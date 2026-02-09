@@ -1,8 +1,5 @@
 <p align="center">
-  <h1 align="center">MIA–AI/h1>
-  <p align="center">
-    Asistente VTuber local con <strong>latencia mínima</strong>, memoria RAG y conexión a VTube Studio.<br>
-    Sin Unity. Sin la nube. Todo corre en tu máquina.
+  <h1 align="center">MIA–AI
   </p>
 </p>
 
@@ -14,8 +11,6 @@
 </p>
 
 ---
-
-## ✨ ¿Qué es MIA?
 
 MIA es un pipeline de voz conversacional que convierte tu micrófono en un avatar interactivo:
 
@@ -38,7 +33,7 @@ Todo funciona **localmente** y en **streaming** – el avatar empieza a hablar a
 
 ---
 
-## 🏗️ Arquitectura
+## Arquitectura
 
 ```
 MIA-AI/
@@ -71,7 +66,7 @@ MIA-AI/
 
 ---
 
-## 🚀 Instalación
+## Instalación
 
 ### Requisitos previos
 
@@ -103,7 +98,7 @@ pip install llama-cpp-python
 pip install TTS
 ```
 
-> **💡 Nota Windows:** Si `TTS` falla al compilar, instala [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) con el workload "C++ build tools".
+> ** Nota Windows:** Si `TTS` falla al compilar, instala [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) con el workload "C++ build tools".
 
 ### 3. Descargar modelos
 
@@ -259,18 +254,3 @@ MIA recuerda conversaciones pasadas gracias a un sistema RAG local:
 
 ---
 
-## 🤝 Contribuir
-
-Leer [AGENTS.md](AGENTS.md) antes de contribuir. Puntos clave:
-
-- **Latencia ante todo** – no subir la latencia percibida
-- **Configuración en YAML** – no hardcodear valores
-- **Módulos pequeños** – responsabilidad única
-- **Tests obligatorios** – para cambios en config, prompt, OSC/WS, chunking
-- **Profiling** – medir `stt_ms`, `rag_retrieval_ms`, `llm_first_token_ms`, `tts_first_audio_ms`
-
----
-
-## 📄 Licencia
-
-[GNU Affero General Public License v3.0](LICENSE)
