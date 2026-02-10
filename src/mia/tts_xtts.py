@@ -87,10 +87,21 @@ class XTTS:
                 import torch
                 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+            # Torch 2.6+ defaults weights_only=True, incompatible with Coqui TTS 0.22
+            # This monkey-patch forces weights_only=False for torch.load calls made by TTS.
+            import torch
+            _original_load = torch.load
+            torch.load = lambda *args, **kwargs: _original_load(
+                *args, **{**kwargs, "weights_only": False}
+            )
+
             logger.info("Cargando XTTS v2 en device=%s", device)
 
             self._tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
             self._tts.to(device)
+
+            # Restaurar torch.load original
+            torch.load = _original_load
 
             # Verificar que el archivo de voz existe
             voice = Path(self.voice_path)

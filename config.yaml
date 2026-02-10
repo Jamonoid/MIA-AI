@@ -3,7 +3,7 @@ prompt:
 
 models:
   llm:
-    backend: "llamacpp"            # "llamacpp" | "lmstudio" | "openrouter"
+    backend: "lmstudio"            # "llamacpp" | "lmstudio" | "openrouter"
     path: "./models/llama-3-8b.gguf"
     context_size: 2048
     max_tokens: 512
@@ -12,7 +12,7 @@ models:
     n_gpu_layers: -1
     # LM Studio / OpenRouter (solo si backend: "lmstudio" o "openrouter")
     base_url: "http://localhost:1234/v1"  # LM Studio default
-    model_name: "default"
+    model_name: "rocinante-x-12b-v1"
     api_key: ""                    # Solo OpenRouter (o env OPENROUTER_API_KEY)
   stt:
     model_size: "large-v3"

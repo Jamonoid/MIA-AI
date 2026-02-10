@@ -31,8 +31,8 @@ def main() -> None:
     logger = logging.getLogger("mia")
 
     logger.info("╔══════════════════════════════════════╗")
-    logger.info("║        MIA – Interactive Avatar       ║")
-    logger.info("║            v0.1.0                     ║")
+    logger.info("║             MIA – AI                 ║")
+    logger.info("║              v0.1.0                  ║")
     logger.info("╚══════════════════════════════════════╝")
 
     # Cargar config

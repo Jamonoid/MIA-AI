@@ -87,18 +87,33 @@ Si un agente necesita un parámetro nuevo:
 
 ---
 
-## Cómo ejecutar con `uv`
+## Setup y ejecución
 
-### 1) Crear entorno e instalar dependencias
+### 1) Crear entorno e instalar dependencias base
 ```bash
 uv venv
-uv pip install -e .
+uv pip install -e ".[dev]"
 ```
 
-### 2) Ejecutar
+### 2) Instalar CUDA PyTorch (obligatorio para GPU)
 ```bash
-uv run mia
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
+PyPI solo distribuye torch CPU. Sin este paso, STT/TTS/RAG corren en CPU.
+
+### 3) Instalar dependencias ML
+```bash
+uv pip install faster-whisper
+uv pip install TTS
+# Re-instalar CUDA torch (TTS sobreescribe con CPU torch):
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+```
+
+### 4) Ejecutar
+```bash
+.venv/Scripts/python -m mia.main
+```
+**No usar `uv run mia`** — `uv run` re-resuelve dependencias y puede sobreescribir CUDA torch con la versión CPU de PyPI.
 
 ### Variables y rutas
 - Modelos y voces se esperan bajo `./models` y `./voices` según `config.yaml`.
@@ -139,6 +154,7 @@ uv run mia
   - reproducir mientras se genera el siguiente chunk
 - Evitar ajustes “quality-first” por defecto.
 - Manejar cola de salida (no desordenar chunks).
+- **torch.load compatibility**: torch 2.6+ usa `weights_only=True` por defecto, incompatible con XTTS. `tts_xtts.py` tiene un monkey-patch para forzar `weights_only=False` durante la carga.
 
 ### Lipsync
 - Modo recomendado: **RMS** (simple, estable y rápido).
@@ -181,7 +197,7 @@ Agregar o actualizar tests en `tests/` cuando se modifique:
 
 Ejecutar:
 ```bash
-uv run pytest
+.venv/Scripts/python -m pytest
 ```
 
 ---
@@ -223,6 +239,24 @@ Todo agente que toque el pipeline debe:
 
 ---
 
+## Gestión de dependencias
+
+Versiones que causan problemas conocidos:
+
+| Paquete        | Restricción      | Motivo                                              |
+|----------------|------------------|-----------------------------------------------------|
+| torch          | CUDA build       | PyPI solo tiene CPU. Instalar desde pytorch index   |
+| torchaudio     | Misma versión/CUDA que torch | DLL mismatch si no coinciden           |
+| transformers   | <4.44            | TTS 0.22 usa `BeamSearchScorer` (eliminado en 4.44) |
+| TTS            | 0.22.0           | Sobreescribe torch con CPU al instalarse            |
+
+**Regla**: después de instalar cualquier paquete que dependa de torch (TTS, sentence-transformers, etc.), verificar que torch sigue siendo CUDA:
+```bash
+.venv/Scripts/python -c "import torch; print(torch.cuda.is_available())"  # debe ser True
+```
+
+---
+
 ## Definition of Done (DoD)
 
 Un cambio se considera listo si:
@@ -230,3 +264,4 @@ Un cambio se considera listo si:
 - Configurable vía YAML
 - Sin regressions en tests
 - Código claro, modular y sin dependencias innecesarias
+- No rompe CUDA torch (verificar después de cambios en dependencias)

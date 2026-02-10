@@ -64,9 +64,14 @@ class RAGMemory:
                 metadata={"hnsw:space": "cosine"},
             )
 
+            import torch
             from sentence_transformers import SentenceTransformer
 
-            self._embed_fn = SentenceTransformer(self._embedding_model_name)
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self._embed_fn = SentenceTransformer(
+                self._embedding_model_name, device=device
+            )
+            logger.info("RAG embeddings device: %s", device)
 
             logger.info(
                 "RAG memory inicializada – docs existentes: %d",

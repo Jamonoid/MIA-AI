@@ -11,7 +11,7 @@ Local VTuber assistant pipeline. Low latency, RAG memory, VTube Studio integrati
 
 ### Full local (llamacpp + STT + TTS)
 
-Everything runs on your machine. Needs a dedicated GPU.
+Everything runs on your machine. Needs a dedicated NVIDIA GPU.
 
 | Resource | Minimum            | Recommended             |
 |----------|--------------------|-------------------------|
@@ -30,6 +30,8 @@ Breakdown by component:
 ### CPU-only mode (no GPU)
 
 Possible but significantly slower. Set `device: "cpu"` in STT/TTS config and `n_gpu_layers: 0` for LLM. Expect 5-10x higher latency.
+
+---
 
 ## Overview
 
@@ -87,7 +89,7 @@ config.yaml                All configuration
 
 ## Setup
 
-### 1. Clone and install
+### 1. Clone and create environment
 
 ```bash
 git clone https://github.com/Jamonoid/MIA-AI.git
@@ -96,24 +98,47 @@ uv venv
 uv pip install -e ".[dev]"
 ```
 
-### 2. ML dependencies (optional, heavy)
+### 2. Install CUDA PyTorch
+
+PyPI ships CPU-only torch. For GPU support, install from the PyTorch index:
 
 ```bash
-pip install faster-whisper
-pip install llama-cpp-python
-pip install TTS
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-On Windows, `TTS` requires Visual Studio Build Tools (C++ workload).
+Verify:
+```bash
+.venv/Scripts/python -c "import torch; print(torch.cuda.is_available())"  # True
+```
 
-### 3. Models
+### 3. Install ML dependencies
+
+```bash
+uv pip install faster-whisper
+uv pip install TTS
+```
+
+**Important:** `TTS` may pull in CPU torch as a dependency, overwriting the CUDA version. After installing TTS, re-run the CUDA torch install from step 2.
+
+For local LLM via llama-cpp-python (only if using `backend: "llamacpp"`):
+```bash
+uv pip install llama-cpp-python
+```
+
+### 4. Models
 
 | Component | Model                    | Location                        |
 |-----------|--------------------------|---------------------------------|
 | LLM       | Any GGUF (e.g. Llama 3) | `./models/llama-3-8b.gguf`     |
-| STT       | faster-whisper large-v3  | Auto-download                   |
-| TTS       | XTTS v2                  | Auto-download                   |
+| STT       | faster-whisper large-v3  | Auto-download on first run      |
+| TTS       | XTTS v2                  | Auto-download on first run      |
 | Voice     | WAV reference (~10s)     | `./voices/female_01.wav`        |
+
+### Known issues
+
+- **torch version conflict:** `TTS` installs CPU torch from PyPI, overwriting CUDA torch. Always re-run step 2 after installing TTS.
+- **transformers version:** Coqui TTS 0.22 requires `transformers<4.44` (pinned in pyproject.toml). Newer versions remove `BeamSearchScorer` which TTS depends on.
+- **torch.load weights_only:** torch 2.6+ defaults to `weights_only=True`, incompatible with XTTS model files. Patched in `tts_xtts.py`.
 
 ---
 
@@ -198,8 +223,10 @@ api_key: "sk-or-..."       # or env OPENROUTER_API_KEY
 ## Usage
 
 ```bash
-uv run mia
+.venv/Scripts/python -m mia.main
 ```
+
+Note: prefer running via venv python directly. `uv run mia` may re-resolve dependencies and overwrite CUDA torch with CPU torch.
 
 ### VTube Studio
 
@@ -227,7 +254,7 @@ ChromaDB with `all-MiniLM-L6-v2` embeddings. Stores conversation pairs, retrieve
 ## Tests
 
 ```bash
-uv run pytest -v
+.venv/Scripts/python -m pytest -v
 ```
 
 Covers: config loading, prompt construction, text chunking, VAD, lipsync, RAG.
