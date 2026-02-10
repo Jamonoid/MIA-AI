@@ -27,6 +27,7 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 @dataclass
 class PromptConfig:
     system: str = "Eres MIA, una asistente virtual inteligente y amigable."
+    dir: str = "./prompts/"  # Carpeta con archivos .md modulares
 
 
 @dataclass
@@ -112,6 +113,8 @@ class WebSocketConfig:
     host: str = "127.0.0.1"
     port: int = 8765
     enabled: bool = True
+    webui_dir: str = "./web/"    # Carpeta con archivos estáticos del WebUI
+    webui_port: int = 8080       # Puerto HTTP para el WebUI
 
 
 @dataclass

@@ -4,7 +4,8 @@
 # ══════════════════════════════════════════════════════
 
 prompt:
-  system: "Eres MIA, Vtuber IA."
+  system: "Eres MIA, Vtuber IA."       # Fallback si prompts/ no existe
+  dir: "./prompts/"                     # Carpeta con archivos .md modulares
 
 models:
   llm:

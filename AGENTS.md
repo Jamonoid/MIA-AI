@@ -62,6 +62,14 @@ mia/
     lipsync.py
     rag_memory.py
     vision.py             # captura de pantalla + LLM visión (OpenRouter)
+    conversations/        # sistema de turnos de conversación
+      __init__.py
+      types.py            # type aliases y dataclasses compartidas
+      message_handler.py  # sincronización frontend↔backend (asyncio.Event)
+      tts_manager.py      # TTS paralelo con reordenamiento por seq number
+      conversation_handler.py   # entry point: despacha triggers a tasks
+      single_conversation.py    # flujo completo de conversación 1:1
+      conversation_utils.py     # helpers compartidos
     tools/
       web_search.py       # búsqueda en internet (MCP + DuckDuckGo)
     vtube_osc.py
@@ -81,6 +89,8 @@ mia/
     test_config.py
     test_prompt.py
     test_rag.py
+    test_message_handler.py
+    test_tts_manager.py
 ```
 
 > Un agente debe mantener los módulos pequeños y con responsabilidad única.
@@ -286,6 +296,60 @@ Todo agente que toque el pipeline debe:
 - Si `rag.enabled` es `false`, no simular memoria ni hacer referencia a conversaciones pasadas.
 - Si `rag.enabled` es `true`, MIA puede referenciar contexto recuperado pero **nunca fabricar recuerdos** que no estén en los fragmentos.
 - Si falta contexto, preguntar **una sola cosa** para reducir turnos.
+
+### Sistema de turnos de conversación
+
+El paquete `conversations/` implementa un sistema de control de turnos basado en `asyncio.Task`. La arquitectura está documentada en detalle en `conversation_turn_system_guide.md`.
+
+#### Arquitectura general
+
+```
+WebSocket Message → conversation_handler → asyncio.Task
+                                             ↓
+                                    single_conversation
+                                             ↓
+                                    LLM stream → TTSTaskManager (parallel)
+                                             ↓
+                                    Ordered audio → WebSocket → Frontend
+                                             ↓
+                                    wait "frontend-playback-complete"
+                                             ↓
+                                    Turn complete
+```
+
+#### Componentes clave
+
+| Módulo | Responsabilidad |
+|---|---|
+| `message_handler.py` | Sincronización request-response sobre WebSocket con `asyncio.Event` |
+| `tts_manager.py` | TTS paralelo con sequence numbers + buffer de reordenamiento |
+| `conversation_handler.py` | Entry point: recibe triggers, despacha tasks, maneja concurrency guard |
+| `single_conversation.py` | Flujo completo de un turno de conversación (14 pasos) |
+| `conversation_utils.py` | Helpers compartidos (señales, cleanup, finalización) |
+
+#### Reglas de implementación
+
+- **Un turno por cliente a la vez**: verificar `task.done()` antes de crear una nueva task.
+- **TTS paralelo, entrega ordenada**: cada chunk de TTS recibe un sequence number; el sender loop bufferea y envía en orden.
+- **Sincronización con frontend**: después de enviar todo el audio, el backend envía `backend-synth-complete` y **bloquea** hasta recibir `frontend-playback-complete`.
+- **Cleanup siempre**: usar `try/except CancelledError/finally` en todo flujo de conversación.
+- **Interrupciones**: al cancelar una task, guardar respuesta parcial en historial y marcar `[Interrupted by user]`.
+
+#### Protocolo WebSocket (mensajes de conversación)
+
+**Backend → Frontend:**
+- `conversation-chain-start` — AI procesando
+- `backend-synth-complete` — no hay más audio
+- `force-new-message` — frontend inicia nueva burbuja
+- `conversation-chain-end` — turno completo
+- `audio-response` — chunk de audio + texto display
+- `interrupt-signal` — conversación interrumpida
+
+**Frontend → Backend:**
+- `text-input` — usuario envió texto
+- `mic-audio-end` — usuario terminó de hablar
+- `frontend-playback-complete` — audio reproducido
+- `interrupt` — usuario quiere interrumpir
 
 ---
 

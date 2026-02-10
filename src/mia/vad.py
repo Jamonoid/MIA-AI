@@ -40,6 +40,11 @@ class EnergyVAD:
         self._last_speech: float = 0.0
         self._speech_buffer: list[np.ndarray] = []
 
+        # Pre-roll: guardar los últimos N chunks de silencio para no perder
+        # el inicio de las palabras (antes de cruzar el umbral de energía)
+        self._pre_roll_size = 5  # ~100ms a 20ms/chunk
+        self._pre_roll: list[np.ndarray] = []
+
     @staticmethod
     def rms(audio: np.ndarray) -> float:
         """Calcula RMS de un buffer de audio."""
@@ -64,9 +69,15 @@ class EnergyVAD:
                 self._state = VADState.SPEECH
                 self._speech_start = now
                 self._last_speech = now
-                self._speech_buffer = [chunk]
-                logger.debug("VAD: speech_start (RMS=%.4f)", energy)
+                # Incluir pre-roll para no perder inicio de palabras
+                self._speech_buffer = list(self._pre_roll) + [chunk]
+                self._pre_roll = []
+                logger.debug("VAD: speech_start (RMS=%.4f, pre_roll=%d chunks)", energy, len(self._speech_buffer) - 1)
                 return "speech_start", None
+            # Mantener buffer circular de pre-roll
+            self._pre_roll.append(chunk)
+            if len(self._pre_roll) > self._pre_roll_size:
+                self._pre_roll.pop(0)
             return "silence", None
 
         else:  # SPEECH
@@ -103,5 +114,6 @@ class EnergyVAD:
         """Reinicia el estado del VAD."""
         self._state = VADState.SILENCE
         self._speech_buffer = []
+        self._pre_roll = []
         self._speech_start = 0.0
         self._last_speech = 0.0

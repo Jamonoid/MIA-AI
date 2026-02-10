@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIA – Panel de Control</title>
+  <meta name="description" content="Panel de control para MIA-AI VTuber assistant">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-icon">✦</span>
+          <h1>MIA</h1>
+        </div>
+        <span id="status-badge" class="badge badge-offline">desconectado</span>
+      </div>
+      <div class="header-right">
+        <span id="ws-indicator" class="ws-dot offline" title="WebSocket"></span>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="main-grid">
+
+      <!-- Chat Panel -->
+      <section class="panel chat-panel" id="chat-panel">
+        <div class="panel-header">
+          <h2>💬 Chat</h2>
+          <button id="btn-clear-chat" class="btn-icon" title="Limpiar chat">🗑️</button>
+        </div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" class="chat-input" placeholder="Escribe un mensaje..." autocomplete="off">
+          <button id="btn-send" class="btn-primary btn-send">Enviar</button>
+        </div>
+      </section>
+
+      <!-- Controls Panel -->
+      <section class="panel controls-panel">
+        <div class="panel-header">
+          <h2>🎛️ Controles</h2>
+        </div>
+        <div class="controls-grid">
+          <!-- Mic -->
+          <button id="btn-mute" class="control-btn" data-active="true">
+            <span class="control-icon">🎤</span>
+            <span class="control-label">Micrófono</span>
+            <span class="control-state" id="mic-state">activo</span>
+          </button>
+          <!-- Pipeline -->
+          <button id="btn-pause" class="control-btn" data-active="true">
+            <span class="control-icon">▶️</span>
+            <span class="control-label">Pipeline</span>
+            <span class="control-state" id="pipeline-state">activo</span>
+          </button>
+          <!-- RAG -->
+          <button id="btn-rag" class="control-btn" data-active="true">
+            <span class="control-icon">🧠</span>
+            <span class="control-label">RAG</span>
+            <span class="control-state" id="rag-state">activo</span>
+          </button>
+          <!-- Vision -->
+          <button id="btn-vision" class="control-btn" data-active="false">
+            <span class="control-icon">👁️</span>
+            <span class="control-label">Visión</span>
+            <span class="control-state" id="vision-state">inactivo</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Metrics Panel -->
+      <section class="panel metrics-panel">
+        <div class="panel-header">
+          <h2>📊 Latencia</h2>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric">
+            <span class="metric-label">STT</span>
+            <span class="metric-value" id="metric-stt">—</span>
+            <span class="metric-unit">ms</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">RAG</span>
+            <span class="metric-value" id="metric-rag">—</span>
+            <span class="metric-unit">ms</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">LLM</span>
+            <span class="metric-value" id="metric-llm">—</span>
+            <span class="metric-unit">ms</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">TTS</span>
+            <span class="metric-value" id="metric-tts">—</span>
+            <span class="metric-unit">ms</span>
+          </div>
+          <div class="metric metric-total">
+            <span class="metric-label">Total</span>
+            <span class="metric-value" id="metric-total">—</span>
+            <span class="metric-unit">ms</span>
+          </div>
+        </div>
+        <!-- Audio level -->
+        <div class="audio-level-container">
+          <span class="audio-level-label">🔊 Audio</span>
+          <div class="audio-level-bar">
+            <div class="audio-level-fill" id="audio-level"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TTS Config Panel -->
+      <section class="panel tts-panel">
+        <div class="panel-header">
+          <h2>🔧 TTS</h2>
+        </div>
+        <div class="tts-controls">
+          <label class="slider-group">
+            <span>Rate</span>
+            <input type="range" id="tts-rate" min="-50" max="50" value="5">
+            <output id="tts-rate-val">+5%</output>
+          </label>
+          <label class="slider-group">
+            <span>Pitch</span>
+            <input type="range" id="tts-pitch" min="-50" max="100" value="42">
+            <output id="tts-pitch-val">+42Hz</output>
+          </label>
+        </div>
+      </section>
+
+      <!-- Logs Panel -->
+      <section class="panel logs-panel">
+        <div class="panel-header">
+          <h2>📝 Logs</h2>
+          <div class="log-filters">
+            <button class="log-filter active" data-level="all">All</button>
+            <button class="log-filter" data-level="info">Info</button>
+            <button class="log-filter" data-level="debug">Debug</button>
+            <button class="log-filter" data-level="error">Error</button>
+          </div>
+        </div>
+        <div id="log-output" class="log-output"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

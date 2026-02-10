@@ -1,5 +1,6 @@
 prompt:
   system: "Eres MIA, una asistente virtual inteligente y amigable. Respondes de forma concisa y natural en español."
+  dir: "./prompts/"                # Carpeta con archivos .md modulares (override system)
 
 models:
   llm:
@@ -12,10 +13,10 @@ models:
     n_gpu_layers: -1
     # LM Studio / OpenRouter (solo si backend: "lmstudio" o "openrouter")
     base_url: "http://localhost:1234/v1"  # LM Studio default
-    model_name: "default"
+    model_name: "rocinante-x-12b-v1"
     api_key: ""                    # Solo OpenRouter (o env OPENROUTER_API_KEY)
   stt:
-    model_size: "large-v3"
+    model_size: "large-v3-turbo"
     language: "es"
     device: "auto"
     compute_type: "int8"

@@ -46,15 +46,54 @@ class MIAPipeline:
         self._blink_ctrl = None
         self._ws = None
         self._rag = None
+        self._conversation_handler = None
 
     # ──────────────────────────────────────────
     # Inicialización
     # ──────────────────────────────────────────
 
+    def _load_modular_prompt(self) -> None:
+        """Carga archivos .md de la carpeta de prompts y arma el system prompt."""
+        from pathlib import Path
+
+        prompt_dir = Path(self.config.prompt.dir)
+        if not prompt_dir.is_dir():
+            logger.info(
+                "Carpeta de prompts no encontrada (%s), usando prompt.system",
+                prompt_dir,
+            )
+            return
+
+        md_files = sorted(prompt_dir.glob("*.md"))
+        if not md_files:
+            logger.info("Carpeta de prompts vacía, usando prompt.system")
+            return
+
+        parts: list[str] = []
+        for md_file in md_files:
+            content = md_file.read_text(encoding="utf-8").strip()
+            if content:
+                parts.append(content)
+
+        if parts:
+            combined = "\n\n---\n\n".join(parts)
+            self.config.prompt.system = combined
+            logger.info(
+                "Prompt modular: %d archivos cargados (%s)",
+                len(parts),
+                ", ".join(f.name for f in md_files),
+            )
+        else:
+            logger.info("Archivos de prompt vacíos, usando prompt.system")
+
+
     def load(self) -> None:
         """Carga todos los módulos. Llamar antes de run()."""
         logger.info("═══ Cargando módulos MIA ═══")
         t0 = time.perf_counter()
+
+        # ── Prompt modular ──
+        self._load_modular_prompt()
 
         # Audio I/O
         from .audio_io import AudioCapture, AudioPlayer
@@ -147,6 +186,30 @@ class MIAPipeline:
         elapsed = (time.perf_counter() - t0) * 1000
         logger.info("═══ Módulos cargados en %.1f ms ═══", elapsed)
 
+        # ── Conversation Handler (requiere LLM, TTS, STT, RAG ya cargados) ──
+        from .conversations.conversation_handler import ConversationHandler
+
+        self._conversation_handler = ConversationHandler(
+            llm=self._llm,
+            tts=self._tts,
+            stt=self._stt,
+            rag=self._rag,
+            ws_server=self._ws,
+            osc=self._osc,
+            lipsync=self._lipsync,
+            audio_player=self._audio_player,
+            executor=self._executor,
+            chat_history=self._chat_history,
+            rag_enabled=self.config.rag.enabled,
+            chunk_size=self.config.tts.chunk_size,
+            audio_sample_rate=self.config.audio.sample_rate,
+            playback_sample_rate=self.config.audio.playback_sample_rate,
+        )
+
+        # Registrar con WSServer para despacho de mensajes WebSocket
+        self._ws.set_conversation_handler(self._conversation_handler)
+        logger.info("ConversationHandler registrado")
+
     # ──────────────────────────────────────────
     # Loop principal
     # ──────────────────────────────────────────
@@ -175,17 +238,55 @@ class MIAPipeline:
             await self.shutdown()
 
     async def _listen_and_respond(self) -> None:
-        """Un ciclo: escuchar → transcribir → generar → hablar."""
+        """Un ciclo: escuchar → detectar fin de habla → delegar a conversation_handler."""
         loop = asyncio.get_event_loop()
+
+        # ── 0. Si hay conversación activa, esperar sin capturar audio ──
+        if self._conversation_handler and self._ws.enabled:
+            # Buscar el primer cliente conectado
+            client_uid = None
+            for _ws, uid in self._ws._client_uids.items():
+                client_uid = uid
+                break
+
+            if client_uid and self._conversation_handler.is_busy(client_uid):
+                await asyncio.sleep(0.1)  # Yield sin capturar audio
+                return
 
         # ── 1. Captura + VAD ──
         audio_data = await self._capture_speech(loop)
         if audio_data is None:
             return
 
+        # ── 2. Delegar a ConversationHandler ──
+        if self._conversation_handler and self._ws.enabled:
+            # Buscar el primer cliente conectado para enviar
+            client_uid = None
+            websocket = None
+            for ws, uid in self._ws._client_uids.items():
+                client_uid = uid
+                websocket = ws
+                break
+
+            if client_uid and websocket:
+                async def _send(msg: str) -> None:
+                    try:
+                        await websocket.send(msg)
+                    except Exception:
+                        pass
+
+                await self._conversation_handler.handle_trigger(
+                    "mic-audio-end",
+                    {"audio_data": audio_data},
+                    client_uid,
+                    _send,
+                )
+                return
+
+        # ── Fallback: pipeline legacy (sin WebSocket) ──
         t_start = time.perf_counter()
 
-        # ── 2. STT ──
+        # STT
         text = await loop.run_in_executor(
             self._executor,
             self._stt.transcribe,
@@ -204,7 +305,7 @@ class MIAPipeline:
             await self._ws.send_subtitle(text, role="user")
             await self._ws.send_status("thinking")
 
-        # ── 3. RAG Retrieval ──
+        # RAG Retrieval
         t_rag = time.perf_counter()
         rag_context = ""
         if self._rag.enabled:
@@ -215,10 +316,10 @@ class MIAPipeline:
             )
         rag_ms = (time.perf_counter() - t_rag) * 1000
 
-        # ── 4. LLM Streaming → TTS Chunking ──
+        # LLM Streaming → TTS Chunking (legacy secuencial)
         await self._generate_and_speak(text, rag_context, loop)
 
-        # ── 5. Métricas ──
+        # Métricas
         end_to_end_ms = (time.perf_counter() - t_start) * 1000
         logger.info(
             "📊 Métricas: stt=%.0fms rag=%.0fms total=%.0fms",
