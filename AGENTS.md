@@ -9,10 +9,11 @@ Guía para agentes (IA o humanos) que contribuyen al proyecto **MIA-AI** (Live2D
 Construir un asistente VTuber local con el menor retardo percibido posible:
 
 - Entrada: micrófono → VAD → STT (streaming)
-- Contexto: RAG memory (recuperación de fragmentos relevantes)
-- Generación: LLM (streaming, con contexto RAG inyectado)
-- Salida: TTS (XTTS, chunking) → reproducción de audio
+- Contexto: RAG memory + búsqueda web (MCP/DuckDuckGo) + visión de pantalla
+- Generación: LLM (streaming, con contexto inyectado)
+- Salida: TTS (XTTS o Edge TTS, chunking) → reproducción de audio
 - Animación: lipsync + expresiones → OSC a VTube Studio **o** WebSocket a frontend propio
+- Control: WebUI para monitoreo y configuración en tiempo real
 
 **Metas de latencia (referencia):**
 - Primer token del LLM: < 300 ms (depende del modelo y GPU)
@@ -60,10 +61,22 @@ mia/
     tts_edge.py
     lipsync.py
     rag_memory.py
+    vision.py             # captura de pantalla + LLM visión (OpenRouter)
+    tools/
+      web_search.py       # búsqueda en internet (MCP + DuckDuckGo)
     vtube_osc.py
-    ws_server.py
+    ws_server.py          # WebSocket + servidor HTTP para WebUI
+  prompts/                # prompt modular (archivos .md concatenados)
+    personality.md
+    expressions.md
+    search.md
+    vision.md
+  web/                    # WebUI (vanilla HTML/CSS/JS)
+    index.html
+    style.css
+    app.js
   data/
-    chroma_db/          # vector store persistente (auto-generado)
+    chroma_db/            # vector store persistente (auto-generado)
   tests/
     test_config.py
     test_prompt.py
@@ -77,7 +90,7 @@ mia/
 ## Configuración (YAML)
 
 - **No hardcodear** rutas de modelos ni prompts: todo va en `config.yaml`.
-- La sección `prompt.system` define la personalidad.
+- La personalidad y las instrucciones del LLM se definen en la carpeta `prompts/` (ver sección **Prompt modular**).
 - No agregar “lore” largo: mantener el prompt compacto para reducir tokens y latencia.
 
 Si un agente necesita un parámetro nuevo:
@@ -143,14 +156,11 @@ uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu1
 - **Motor**: ChromaDB (local, persistente en `./data/chroma_db/`).
 - **Embeddings**: `sentence-transformers` con modelo ligero (`all-MiniLM-L6-v2` ~80 MB).
 - **Ingesta**: al finalizar cada turno se almacenan pares `(user_msg, assistant_msg)` como documentos.
--   **Motor**: ChromaDB (local, persistente en `./data/chroma_db/`).
--   **Embeddings**: `sentence-transformers` con modelo ligero (`all-MiniLM-L6-v2` ~80 MB).
--   **Ingesta**: al finalizar cada turno se almacenan pares `(user_msg, assistant_msg)` como documentos.
--   **Retrieval**: buscar top-K fragmentos (configurable, default `k=3`) por similitud coseno.
--   **Inyección en prompt**: insertar fragmentos relevantes como sección `## Contexto previo` antes del último mensaje del usuario.
--   **Latencia**: la búsqueda vectorial debe completarse en < 50 ms; ejecutar en hilo separado si es necesario.
--   **Limpieza**: respetar `rag.max_docs`; si se excede, eliminar los más antiguos.
--   **Desactivación**: si `rag.enabled` es `false`, no cargar ChromaDB ni embeddings.
+- **Retrieval**: buscar top-K fragmentos (configurable, default `k=3`) por similitud coseno.
+- **Inyección en prompt**: insertar fragmentos relevantes como sección `## Contexto previo` antes del último mensaje del usuario.
+- **Latencia**: la búsqueda vectorial debe completarse en < 50 ms; ejecutar en hilo separado si es necesario.
+- **Limpieza**: respetar `rag.max_docs`; si se excede, eliminar los más antiguos.
+- **Desactivación**: si `rag.enabled` es `false`, no cargar ChromaDB ni embeddings.
 
 ### TTS
 
@@ -190,6 +200,46 @@ Se soportan dos backends seleccionables vía `models.tts.backend` en `config.yam
   - `{"type":"mouth","value":0.42}`
   - `{"type":"emotion","value":"happy"}`
 - Evitar enviar texto completo al frontend salvo para subtítulos.
+
+### Prompt modular
+- En vez de un string en `prompt.system`, MIA carga una carpeta `prompts/` con archivos `.md`.
+- Cada archivo es un módulo del system prompt (personalidad, expresiones, herramientas, visión, etc.).
+- Se concatenan en orden alfabético (o configurable) al armar el system prompt.
+- Permite editar la personalidad sin tocar código ni reiniciar (hot-reload nice-to-have).
+- Nuevos archivos `.md` en la carpeta se incluyen automáticamente.
+- La carpeta se configura vía `prompt.dir` en `config.yaml` (default `./prompts/`).
+
+### Búsqueda web (MCP + DuckDuckGo)
+- El LLM puede solicitar búsquedas en internet emitiendo un tag/JSON especial en su respuesta.
+- Módulo `tools/web_search.py` ejecuta la búsqueda vía servidor MCP con DuckDuckGo.
+- Los resultados se inyectan como contexto y el LLM genera su respuesta final.
+- Configurable en YAML: `tools.web_search.enabled`, `max_results`.
+- Instrucciones para el LLM en `prompts/search.md`.
+- No bloquear el pipeline: ejecutar en hilo separado.
+
+### Vision LLM (captura de pantalla)
+- Módulo `vision.py` captura la pantalla cada N segundos (configurable).
+- Envía el screenshot a un LLM con visión vía **OpenRouter** (ej. `google/gemini-flash-1.5-8b`).
+- La descripción devuelta se inyecta en el prompt como `## Lo que ves en pantalla`.
+- Configurable: `vision.enabled`, `vision.interval_s`, `vision.model`, `vision.api_key`.
+- **Toggle on/off desde el WebUI** vía comando WebSocket.
+- Debe correr en hilo aparte para no bloquear el pipeline principal.
+- Instrucciones para el LLM en `prompts/vision.md`.
+
+### WebUI (panel de control)
+- **Stack**: vanilla HTML/CSS/JS (sin frameworks ni build step).
+- Servido como archivos estáticos desde `web/` por el mismo proceso Python.
+- Comunicación bidireccional por WebSocket (el existente en `ws_server.py`).
+- Funcionalidades:
+  - Mute/unmute micrófono, pausa del pipeline
+  - Subtítulos en tiempo real (usuario + MIA)
+  - Historial de conversación
+  - Caja de texto (modo chat escrito)
+  - Métricas de latencia en vivo (STT, RAG, LLM, TTS)
+  - Toggle de visión on/off
+  - Toggle de RAG on/off
+  - Selector de voz TTS / sliders de rate/pitch
+  - Logs filtrables y panel de debug
 
 ---
 
