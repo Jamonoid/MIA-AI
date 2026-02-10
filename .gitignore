@@ -44,6 +44,7 @@ data/chroma_db/
 .env
 .envrc
 *.secret
+config.yaml
 config.local.yaml
 
 # ── Logs ──

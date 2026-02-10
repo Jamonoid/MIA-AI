@@ -1,0 +1,71 @@
+# ══════════════════════════════════════════════════════
+# MIA-AI – config.example.yaml
+# Copia este archivo como config.yaml y ajusta los valores.
+# ══════════════════════════════════════════════════════
+
+prompt:
+  system: "Eres MIA, Vtuber IA."
+
+models:
+  llm:
+    backend: "lmstudio"            # "llamacpp" | "lmstudio" | "openrouter"
+    path: "./models/llama-3-8b.gguf"  # Solo para backend: llamacpp
+    context_size: 2048
+    max_tokens: 512
+    temperature: 0.7
+    top_p: 0.9
+    n_gpu_layers: -1               # -1 = todas las capas en GPU
+    # LM Studio / OpenRouter (solo si backend: "lmstudio" o "openrouter")
+    base_url: "http://localhost:1234/v1"  # LM Studio default
+    model_name: "default"          # Nombre del modelo en LM Studio / OpenRouter
+    api_key: ""                    # Solo OpenRouter (o env OPENROUTER_API_KEY)
+  stt:
+    model_size: "large-v3"         # tiny | base | small | medium | large-v3
+    language: "es"
+    device: "auto"                 # "auto" | "cuda" | "cpu"
+    compute_type: "int8"
+  tts:
+    voice_path: "./voices/female_01.wav"  # WAV de referencia (~10s) para clonación
+    chunk_size: 150
+    language: "es"
+    device: "auto"                 # "auto" | "cuda" | "cpu"
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_ms: 20
+  playback_sample_rate: 24000
+
+vad:
+  energy_threshold: 0.01
+  silence_duration_ms: 800
+  min_speech_duration_ms: 300
+
+rag:
+  enabled: true
+  embedding_model: "all-MiniLM-L6-v2"
+  persist_dir: "./data/chroma_db"
+  top_k: 3
+  max_docs: 5000
+  score_threshold: 0.3
+
+lipsync:
+  smoothing_alpha: 0.2
+  rms_min: 0.0
+  rms_max: 0.3
+
+osc:
+  ip: "127.0.0.1"
+  port: 9000
+  mapping:
+    mouth_open: "MouthOpen"
+    blink: "EyeBlink"
+
+websocket:
+  host: "127.0.0.1"
+  port: 8765
+  enabled: true
+
+performance:
+  vad_sensitivity: 0.5
+  lipsync_smoothing: 0.2
