@@ -31,16 +31,17 @@ class PromptConfig:
 
 @dataclass
 class LLMConfig:
-    backend: str = "llamacpp"  # "llamacpp" | "lmstudio"
+    backend: str = "llamacpp"  # "llamacpp" | "lmstudio" | "openrouter"
     path: str = "./models/llama-3-8b.gguf"
     context_size: int = 2048
     max_tokens: int = 512
     temperature: float = 0.7
     top_p: float = 0.9
     n_gpu_layers: int = -1  # -1 = todas las capas en GPU
-    # LM Studio settings
+    # LM Studio / OpenRouter settings
     base_url: str = "http://localhost:1234/v1"
-    model_name: str = "default"  # LM Studio usa el modelo cargado en su UI
+    model_name: str = "default"
+    api_key: str = ""  # OpenRouter API key (o env OPENROUTER_API_KEY)
 
 
 @dataclass

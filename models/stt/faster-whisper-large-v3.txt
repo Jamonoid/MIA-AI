@@ -1,0 +1,5 @@
+# faster-whisper large-v3
+# Este modelo se descarga automáticamente al ejecutar MIA.
+# Repo: https://huggingface.co/Systran/faster-whisper-large-v3
+# Tamaño aprox: ~3 GB
+# Se almacena en cache de HuggingFace (~/.cache/huggingface/)

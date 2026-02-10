@@ -1,85 +1,69 @@
-<p align="center">
-  <h1 align="center">MIA–AI/h1>
-  <p align="center">
-    Asistente VTuber local con <strong>latencia mínima</strong>, memoria RAG y conexión a VTube Studio.<br>
-    Sin Unity. Sin la nube. Todo corre en tu máquina.
-  </p>
-</p>
+# MIA-AI
 
-<p align="center">
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white" alt="Python">
-  <img src="https://img.shields.io/badge/license-AGPL--3.0-green" alt="License">
-  <img src="https://img.shields.io/badge/VTube_Studio-OSC-purple" alt="VTube Studio">
-  <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status">
-</p>
+Local VTuber assistant pipeline. Low latency, RAG memory, VTube Studio integration via OSC.  
+
+**Python:** 3.11+  
+**Status:** Alpha
 
 ---
 
-## ✨ ¿Qué es MIA?
+## Overview
 
-MIA es un pipeline de voz conversacional que convierte tu micrófono en un avatar interactivo:
+Voice-to-avatar pipeline with streaming at every stage:
 
 ```
-🎤 Micrófono → VAD → STT → RAG Memory → LLM → TTS → 🔊 Audio
-                                                  ↓
-                                            Lipsync → VTube Studio / WebSocket
+Mic -> VAD -> STT -> RAG -> LLM (stream) -> TTS (chunked) -> Audio
+                                                |
+                                          Lipsync -> OSC / WebSocket
 ```
 
-Todo funciona **localmente** y en **streaming** – el avatar empieza a hablar antes de que el LLM termine de generar texto.
+### Latency targets
 
-### Metas de latencia
-
-| Etapa | Objetivo |
-|---|---|
-| Primer token LLM | < 300 ms |
-| Primera salida de voz | < 900 ms |
-| Lipsync update rate | 50–100 Hz |
-| RAG retrieval | < 50 ms |
+| Stage              | Target     |
+|--------------------|------------|
+| LLM first token    | < 300 ms   |
+| First voice output | < 900 ms   |
+| Lipsync rate       | 50-100 Hz  |
+| RAG retrieval      | < 50 ms    |
 
 ---
 
-## 🏗️ Arquitectura
+## Project structure
 
 ```
-MIA-AI/
-├── config.yaml              # Toda la configuración (modelos, prompts, OSC, etc.)
-├── pyproject.toml            # Dependencias y metadata del proyecto
-├── AGENTS.md                 # Guía para contribuidores (IA o humanos)
-│
-├── src/mia/
-│   ├── main.py               # Punto de entrada (uv run mia)
-│   ├── config.py             # Carga tipada de YAML → dataclasses
-│   ├── pipeline.py           # Orquestador async del pipeline completo
-│   │
-│   ├── audio_io.py           # Captura de mic + cola de reproducción
-│   ├── vad.py                # Voice Activity Detection (RMS)
-│   ├── stt_whispercpp.py     # Speech-to-Text (faster-whisper)
-│   ├── llm_llamacpp.py       # LLM local (llama-cpp-python)
-│   ├── llm_lmstudio.py       # LLM vía LM Studio (API OpenAI)
-│   ├── tts_xtts.py           # Text-to-Speech con chunking (XTTS v2)
-│   ├── rag_memory.py         # Memoria conversacional (ChromaDB)
-│   │
-│   ├── lipsync.py            # Sincronización labial (RMS → mouth_open)
-│   ├── vtube_osc.py          # Control de VTube Studio vía OSC/UDP
-│   └── ws_server.py          # WebSocket server para frontend propio
-│
-├── tests/                    # Tests unitarios
-├── models/                   # Modelos GGUF (no incluidos)
-├── voices/                   # Samples de voz para clonación (no incluidos)
-└── data/chroma_db/           # Vector store persistente (auto-generado)
+src/mia/
+    main.py               Entry point
+    config.py              YAML -> typed dataclasses
+    pipeline.py            Async orchestrator
+
+    audio_io.py            Mic capture + playback queue
+    vad.py                 Energy-based voice activity detection
+    stt_whispercpp.py      STT (faster-whisper)
+    llm_llamacpp.py        LLM local (llama-cpp-python)
+    llm_lmstudio.py        LLM via LM Studio (OpenAI API)
+    llm_openrouter.py      LLM via OpenRouter (cloud)
+    tts_xtts.py            TTS with chunking (XTTS v2)
+    rag_memory.py          Conversational memory (ChromaDB)
+
+    lipsync.py             RMS -> mouth_open (0..1)
+    vtube_osc.py           OSC to VTube Studio
+    ws_server.py           WebSocket broadcast (JSON)
+
+models/
+    stt/                   faster-whisper-large-v3 (auto-download)
+    tts/                   XTTS v2 (auto-download)
+
+voices/                    Reference WAV for voice cloning (~10s)
+data/chroma_db/            Persistent vector store (auto-generated)
+tests/                     Unit tests
+config.yaml                All configuration
 ```
 
 ---
 
-## 🚀 Instalación
+## Setup
 
-### Requisitos previos
-
-- **Python 3.11+**
-- **[uv](https://docs.astral.sh/uv/)** (gestor de paquetes rápido)
-- **GPU con CUDA** (recomendado para STT/LLM/TTS)
-
-### 1. Clonar y crear entorno
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/Jamonoid/MIA-AI.git
@@ -88,62 +72,53 @@ uv venv
 uv pip install -e ".[dev]"
 ```
 
-### 2. Instalar dependencias ML
-
-Estas dependencias son pesadas y requieren compilación C++/CUDA:
+### 2. ML dependencies (optional, heavy)
 
 ```bash
-# STT (faster-whisper descarga el modelo automáticamente)
 pip install faster-whisper
-
-# LLM
 pip install llama-cpp-python
-
-# TTS (requiere Visual Studio Build Tools en Windows)
 pip install TTS
 ```
 
-> **💡 Nota Windows:** Si `TTS` falla al compilar, instala [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) con el workload "C++ build tools".
+On Windows, `TTS` requires Visual Studio Build Tools (C++ workload).
 
-### 3. Descargar modelos
+### 3. Models
 
-Coloca los modelos en las rutas definidas en `config.yaml`:
-
-```bash
-mkdir models voices
-```
-
-| Modelo | Recomendado | Dónde |
-|---|---|---|
-| **LLM** | [Llama 3 8B Q4_K_M](https://huggingface.co/bartowski/Meta-Llama-3-8B-Instruct-GGUF) | `./models/llama-3-8b.gguf` |
-| **STT** | Whisper `base` (auto-descarga) | Automático |
-| **TTS Voice** | WAV de referencia (~10s) | `./voices/female_01.wav` |
+| Component | Model                    | Location                        |
+|-----------|--------------------------|---------------------------------|
+| LLM       | Any GGUF (e.g. Llama 3) | `./models/llama-3-8b.gguf`     |
+| STT       | faster-whisper large-v3  | Auto-download                   |
+| TTS       | XTTS v2                  | Auto-download                   |
+| Voice     | WAV reference (~10s)     | `./voices/female_01.wav`        |
 
 ---
 
-## ⚙️ Configuración
+## Configuration
 
-Todo se controla desde `config.yaml`:
+All settings in `config.yaml`:
 
 ```yaml
 prompt:
-  system: "Eres MIA, una asistente virtual inteligente y amigable."
+  system: "Personality"
 
 models:
   llm:
-    backend: "llamacpp"       # "llamacpp" | "lmstudio"
+    backend: "llamacpp"            # llamacpp | lmstudio | openrouter
     path: "./models/llama-3-8b.gguf"
     context_size: 2048
-    n_gpu_layers: -1          # -1 = todas las capas en GPU
-    # LM Studio (solo si backend: "lmstudio")
+    max_tokens: 512
+    temperature: 0.7
+    n_gpu_layers: -1
+    # LM Studio / OpenRouter
     base_url: "http://localhost:1234/v1"
     model_name: "default"
+    api_key: ""                    # OpenRouter only
   stt:
-    model_size: "base"        # tiny | base | small | medium
+    model_size: "large-v3"
     language: "es"
   tts:
     voice_path: "./voices/female_01.wav"
-    chunk_size: 150            # caracteres por chunk TTS
+    chunk_size: 150
 
 rag:
   enabled: true
@@ -152,125 +127,105 @@ rag:
 
 osc:
   ip: "127.0.0.1"
-  port: 9000                  # Puerto de VTube Studio
-  mapping:
-    mouth_open: "MouthOpen"
-    blink: "EyeBlink"
-
-websocket:
-  host: "127.0.0.1"
-  port: 8765
-  enabled: true
+  port: 9000
 ```
-
-> Consulta [config.yaml](config.yaml) para ver todas las opciones disponibles.
 
 ---
 
-## ▶️ Uso
+## LLM backends
 
-### Ejecutar MIA
+### llamacpp (default)
+
+Runs locally using llama-cpp-python. Requires a GGUF model file and `pip install llama-cpp-python`.
+
+```yaml
+backend: "llamacpp"
+path: "./models/llama-3-8b.gguf"
+```
+
+### lmstudio
+
+Uses LM Studio's local OpenAI-compatible server. No compilation needed.
+
+1. Install [LM Studio](https://lmstudio.ai/), load a model, start local server
+2. Configure:
+
+```yaml
+backend: "lmstudio"
+base_url: "http://localhost:1234/v1"
+```
+
+### openrouter
+
+Cloud access to hundreds of models via [OpenRouter](https://openrouter.ai/).
+
+1. Get an API key from openrouter.ai
+2. Configure:
+
+```yaml
+backend: "openrouter"
+base_url: "https://openrouter.ai/api/v1"
+model_name: "meta-llama/llama-3-8b-instruct"
+api_key: "sk-or-..."       # or env OPENROUTER_API_KEY
+```
+
+---
+
+## Usage
 
 ```bash
 uv run mia
 ```
 
-MIA se iniciará, cargará los modelos y comenzará a escuchar por el micrófono.
+### VTube Studio
 
-### Conectar con VTube Studio
+Enable OSC receiver in VTube Studio on port 9000. Parameters `MouthOpen` and `EyeBlink` update automatically.
 
-1. Abre **VTube Studio**
-2. Ve a **Settings → VTube Studio API → OSC Receiver**
-3. Habilita OSC y configura el puerto `9000`
-4. Los parámetros `MouthOpen` y `EyeBlink` se actualizarán automáticamente
+### WebSocket
 
-### Conectar un frontend propio
-
-MIA expone un servidor WebSocket en `ws://127.0.0.1:8765` que envía mensajes JSON:
+Server at `ws://127.0.0.1:8765`. Messages:
 
 ```json
 {"type": "mouth", "value": 0.42}
 {"type": "emotion", "value": "happy"}
-{"type": "subtitle", "role": "assistant", "text": "¡Hola!"}
+{"type": "subtitle", "role": "assistant", "text": "Hola"}
 {"type": "status", "value": "listening"}
 ```
 
-### Usar LM Studio como backend de LLM
+---
 
-[LM Studio](https://lmstudio.ai/) es la forma más fácil de correr modelos locales — no requiere compilar `llama-cpp-python`.
+## RAG memory
 
-1. **Descarga e instala** [LM Studio](https://lmstudio.ai/)
-2. **Carga un modelo** desde la UI (ej. Llama 3 8B)
-3. **Inicia el servidor local** → "Local Server" → Start
-4. **Cambia el backend** en `config.yaml`:
-
-```yaml
-models:
-  llm:
-    backend: "lmstudio"
-    base_url: "http://localhost:1234/v1"
-```
-
-5. **Ejecuta MIA:** `uv run mia`
-
-> **💡 Ventajas:** No necesita compilación C++. Se puede cambiar de modelo desde la UI de LM Studio sin reiniciar MIA. GPU nativa.
+ChromaDB with `all-MiniLM-L6-v2` embeddings. Stores conversation pairs, retrieves relevant context per query, injects into LLM prompt. Persistent in `./data/chroma_db/`. Disable with `rag.enabled: false`.
 
 ---
 
-## 🧪 Tests
+## Tests
 
 ```bash
 uv run pytest -v
 ```
 
-Los tests cubren:
-- Carga y validación de config YAML
-- Construcción de prompts (con RAG y sin RAG)
-- Chunking de texto para TTS
-- VAD (detección de silencio/habla)
-- Lipsync (mapeo RMS → mouth_open)
+Covers: config loading, prompt construction, text chunking, VAD, lipsync, RAG.
 
 ---
 
-## 🧠 Memoria RAG
+## Stack
 
-MIA recuerda conversaciones pasadas gracias a un sistema RAG local:
-
-- **Almacenamiento:** ChromaDB (persistente en `./data/chroma_db/`)
-- **Embeddings:** `all-MiniLM-L6-v2` (~80 MB)
-- **Funcionamiento:** Al final de cada turno, se almacena el par `(usuario, MIA)`. En cada nueva pregunta, se recuperan los fragmentos más relevantes y se inyectan en el prompt del LLM.
-- **Desactivar:** Pon `rag.enabled: false` en `config.yaml`
-
----
-
-## 📊 Stack tecnológico
-
-| Componente | Tecnología |
-|---|---|
-| STT | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2) |
-| LLM | [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) o [LM Studio](https://lmstudio.ai/) |
-| TTS | [Coqui TTS](https://github.com/coqui-ai/TTS) (XTTS v2) |
-| VAD | Energy-based (RMS, zero deps) |
-| Lipsync | RMS con smoothing exponencial |
-| Avatar | VTube Studio vía OSC / WebSocket |
-| Memoria | ChromaDB + sentence-transformers |
-| Audio | sounddevice (PortAudio) |
-| Config | YAML → dataclasses tipadas |
+| Component | Technology                          |
+|-----------|-------------------------------------|
+| STT       | faster-whisper (CTranslate2)        |
+| LLM       | llama-cpp-python / LM Studio / OpenRouter |
+| TTS       | Coqui TTS (XTTS v2)                |
+| VAD       | Energy-based (RMS)                  |
+| Lipsync   | RMS with exponential smoothing      |
+| Avatar    | VTube Studio (OSC) / WebSocket      |
+| Memory    | ChromaDB + sentence-transformers    |
+| Audio     | sounddevice (PortAudio)             |
+| Config    | YAML -> typed dataclasses           |
 
 ---
 
-## 🤝 Contribuir
-
-Leer [AGENTS.md](AGENTS.md) antes de contribuir. Puntos clave:
-
-- **Latencia ante todo** – no subir la latencia percibida
-- **Configuración en YAML** – no hardcodear valores
-- **Módulos pequeños** – responsabilidad única
-- **Tests obligatorios** – para cambios en config, prompt, OSC/WS, chunking
-- **Profiling** – medir `stt_ms`, `rag_retrieval_ms`, `llm_first_token_ms`, `tts_first_audio_ms`
-
----
-
-## 📄 Licencia
+## License
 
 [GNU Affero General Public License v3.0](LICENSE)

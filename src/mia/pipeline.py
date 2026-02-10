@@ -114,6 +114,12 @@ class MIAPipeline:
             self._llm = LMStudioLLM(self.config.llm, self.config.prompt)
             self._llm.load()
             logger.info("LLM backend: LM Studio (%s)", self.config.llm.base_url)
+        elif backend == "openrouter":
+            from .llm_openrouter import OpenRouterLLM
+
+            self._llm = OpenRouterLLM(self.config.llm, self.config.prompt)
+            self._llm.load()
+            logger.info("LLM backend: OpenRouter (%s)", self.config.llm.model_name)
         else:
             from .llm_llamacpp import LlamaLLM
 

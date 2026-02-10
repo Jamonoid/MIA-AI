@@ -55,6 +55,7 @@ mia/
     stt_whispercpp.py
     llm_llamacpp.py
     llm_lmstudio.py
+    llm_openrouter.py
     tts_xtts.py
     lipsync.py
     rag_memory.py

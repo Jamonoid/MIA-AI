@@ -3,18 +3,19 @@ prompt:
 
 models:
   llm:
-    backend: "llamacpp"            # "llamacpp" | "lmstudio"
+    backend: "llamacpp"            # "llamacpp" | "lmstudio" | "openrouter"
     path: "./models/llama-3-8b.gguf"
     context_size: 2048
     max_tokens: 512
     temperature: 0.7
     top_p: 0.9
     n_gpu_layers: -1
-    # LM Studio (solo si backend: "lmstudio")
-    base_url: "http://localhost:1234/v1"
-    model_name: "default"          # LM Studio usa el modelo cargado en su UI
+    # LM Studio / OpenRouter (solo si backend: "lmstudio" o "openrouter")
+    base_url: "http://localhost:1234/v1"  # LM Studio default
+    model_name: "default"
+    api_key: ""                    # Solo OpenRouter (o env OPENROUTER_API_KEY)
   stt:
-    model_size: "base"
+    model_size: "large-v3"
     language: "es"
     device: "auto"
     compute_type: "int8"
