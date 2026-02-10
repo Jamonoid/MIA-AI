@@ -1,41 +1,45 @@
 # MIA-AI
 
-Local VTuber assistant pipeline. Low latency, RAG memory, VTube Studio integration via OSC.  
+Pipeline de asistente VTuber local. Baja latencia, memoria RAG, integración con VTube Studio vía OSC.
 
 **Python:** 3.11+  
-**Status:** Alpha
+**Estado:** Alpha
 
 ---
 
-## Hardware requirements
+## Requisitos de hardware
 
-### Full local (llamacpp + STT + TTS)
+### Local completo (llamacpp + STT + TTS XTTS)
 
-Everything runs on your machine. Needs a dedicated NVIDIA GPU.
+Todo corre en tu PC. Necesita una GPU NVIDIA dedicada.
 
-| Resource | Minimum            | Recommended             |
-|----------|--------------------|-------------------------|
-| RAM      | 16 GB              | 32 GB                   |
-| VRAM     | 6 GB (8B Q4)       | 12 GB+ (larger models)  |
-| GPU      | NVIDIA GTX 1060    | NVIDIA RTX 3060+        |
-| Disk     | ~10 GB (models)    | ~15 GB                  |
-| CPU      | 4 cores            | 8+ cores                |
+| Recurso  | Mínimo             | Recomendado             |
+|----------|---------------------|-------------------------|
+| RAM      | 16 GB               | 32 GB                   |
+| VRAM     | 6 GB (8B Q4)        | 12 GB+ (modelos mayores)|
+| GPU      | NVIDIA GTX 1060     | NVIDIA RTX 3060+        |
+| Disco    | ~10 GB (modelos)    | ~15 GB                  |
+| CPU      | 4 núcleos           | 8+ núcleos              |
 
-Breakdown by component:
-- **STT** (faster-whisper large-v3): ~3 GB VRAM, ~3 GB disk
-- **LLM** (8B Q4_K_M): ~5 GB VRAM, ~5 GB disk
-- **TTS** (XTTS v2): ~2 GB VRAM, ~2 GB disk
-- **RAG** (MiniLM-L6): ~0.5 GB RAM, ~80 MB disk
+Desglose por componente:
+- **STT** (faster-whisper large-v3): ~3 GB VRAM, ~3 GB disco
+- **LLM** (8B Q4_K_M): ~5 GB VRAM, ~5 GB disco
+- **TTS** (XTTS v2): ~2 GB VRAM, ~2 GB disco
+- **RAG** (MiniLM-L6): ~0.5 GB RAM, ~80 MB disco
 
-### CPU-only mode (no GPU)
+### Modo sin GPU (TTS Edge)
 
-Possible but significantly slower. Set `device: "cpu"` in STT/TTS config and `n_gpu_layers: 0` for LLM. Expect 5-10x higher latency.
+Con `backend: "edge"` en la sección TTS, se usa el servicio online de Microsoft Edge, que **no requiere GPU ni modelo local**. Solo necesita conexión a internet.
+
+### Modo CPU (sin GPU, XTTS)
+
+Posible pero significativamente más lento. Configurar `device: "cpu"` en STT/TTS y `n_gpu_layers: 0` en LLM. Esperar 5-10x más latencia.
 
 ---
 
-## Overview
+## Resumen
 
-Voice-to-avatar pipeline with streaming at every stage:
+Pipeline de voz-a-avatar con streaming en cada etapa:
 
 ```
 Mic -> VAD -> STT -> RAG -> LLM (stream) -> TTS (chunked) -> Audio
@@ -43,53 +47,54 @@ Mic -> VAD -> STT -> RAG -> LLM (stream) -> TTS (chunked) -> Audio
                                           Lipsync -> OSC / WebSocket
 ```
 
-### Latency targets
+### Metas de latencia
 
-| Stage              | Target     |
-|--------------------|------------|
-| LLM first token    | < 300 ms   |
-| First voice output | < 900 ms   |
-| Lipsync rate       | 50-100 Hz  |
-| RAG retrieval      | < 50 ms    |
+| Etapa                | Objetivo   |
+|----------------------|------------|
+| Primer token LLM     | < 300 ms   |
+| Primera salida de voz | < 900 ms   |
+| Tasa de lipsync       | 50-100 Hz  |
+| Búsqueda RAG          | < 50 ms    |
 
 ---
 
-## Project structure
+## Estructura del proyecto
 
 ```
 src/mia/
-    main.py               Entry point
-    config.py              YAML -> typed dataclasses
-    pipeline.py            Async orchestrator
+    main.py               Punto de entrada
+    config.py              YAML -> dataclasses tipados
+    pipeline.py            Orquestador asíncrono
 
-    audio_io.py            Mic capture + playback queue
-    vad.py                 Energy-based voice activity detection
+    audio_io.py            Captura de mic + cola de reproducción
+    vad.py                 Detección de actividad vocal (energía)
     stt_whispercpp.py      STT (faster-whisper)
     llm_llamacpp.py        LLM local (llama-cpp-python)
-    llm_lmstudio.py        LLM via LM Studio (OpenAI API)
-    llm_openrouter.py      LLM via OpenRouter (cloud)
-    tts_xtts.py            TTS with chunking (XTTS v2)
-    rag_memory.py          Conversational memory (ChromaDB)
+    llm_lmstudio.py        LLM vía LM Studio (API OpenAI)
+    llm_openrouter.py      LLM vía OpenRouter (nube)
+    tts_xtts.py            TTS con chunking (XTTS v2)
+    tts_edge.py            TTS con Microsoft Edge (edge-tts)
+    rag_memory.py          Memoria conversacional (ChromaDB)
 
     lipsync.py             RMS -> mouth_open (0..1)
-    vtube_osc.py           OSC to VTube Studio
+    vtube_osc.py           OSC hacia VTube Studio
     ws_server.py           WebSocket broadcast (JSON)
 
 models/
-    stt/                   faster-whisper-large-v3 (auto-download)
-    tts/                   XTTS v2 (auto-download)
+    stt/                   faster-whisper-large-v3 (descarga automática)
+    tts/                   XTTS v2 (descarga automática)
 
-voices/                    Reference WAV for voice cloning (~10s)
-data/chroma_db/            Persistent vector store (auto-generated)
-tests/                     Unit tests
-config.yaml                All configuration
+voices/                    WAV de referencia para clonación de voz (~10s)
+data/chroma_db/            Vector store persistente (auto-generado)
+tests/                     Tests unitarios
+config.yaml                Toda la configuración
 ```
 
 ---
 
-## Setup
+## Instalación
 
-### 1. Clone and create environment
+### 1. Clonar y crear entorno
 
 ```bash
 git clone https://github.com/Jamonoid/MIA-AI.git
@@ -98,57 +103,57 @@ uv venv
 uv pip install -e ".[dev]"
 ```
 
-### 2. Install CUDA PyTorch
+### 2. Instalar PyTorch con CUDA
 
-PyPI ships CPU-only torch. For GPU support, install from the PyTorch index:
+PyPI solo distribuye torch CPU. Para soporte GPU:
 
 ```bash
 uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-Verify:
+Verificar:
 ```bash
 .venv/Scripts/python -c "import torch; print(torch.cuda.is_available())"  # True
 ```
 
-### 3. Install ML dependencies
+### 3. Instalar dependencias ML
 
 ```bash
 uv pip install faster-whisper
 uv pip install TTS
 ```
 
-**Important:** `TTS` may pull in CPU torch as a dependency, overwriting the CUDA version. After installing TTS, re-run the CUDA torch install from step 2.
+**Importante:** `TTS` puede instalar torch CPU como dependencia, sobreescribiendo la versión CUDA. Después de instalar TTS, re-ejecutar el paso 2.
 
-For local LLM via llama-cpp-python (only if using `backend: "llamacpp"`):
+Para LLM local con llama-cpp-python (solo si usas `backend: "llamacpp"`):
 ```bash
 uv pip install llama-cpp-python
 ```
 
-### 4. Models
+### 4. Modelos
 
-| Component | Model                    | Location                        |
-|-----------|--------------------------|---------------------------------|
-| LLM       | Any GGUF (e.g. Llama 3) | `./models/llama-3-8b.gguf`     |
-| STT       | faster-whisper large-v3  | Auto-download on first run      |
-| TTS       | XTTS v2                  | Auto-download on first run      |
-| Voice     | WAV reference (~10s)     | `./voices/female_01.wav`        |
+| Componente | Modelo                   | Ubicación                       |
+|------------|--------------------------|---------------------------------|
+| LLM        | Cualquier GGUF (ej. Llama 3) | `./models/llama-3-8b.gguf` |
+| STT        | faster-whisper large-v3  | Descarga automática             |
+| TTS        | XTTS v2                  | Descarga automática             |
+| Voz        | WAV de referencia (~10s) | `./voices/female_01.wav`        |
 
-### Known issues
+### Problemas conocidos
 
-- **torch version conflict:** `TTS` installs CPU torch from PyPI, overwriting CUDA torch. Always re-run step 2 after installing TTS.
-- **transformers version:** Coqui TTS 0.22 requires `transformers<4.44` (pinned in pyproject.toml). Newer versions remove `BeamSearchScorer` which TTS depends on.
-- **torch.load weights_only:** torch 2.6+ defaults to `weights_only=True`, incompatible with XTTS model files. Patched in `tts_xtts.py`.
+- **Conflicto de versión de torch:** `TTS` instala torch CPU desde PyPI, sobreescribiendo CUDA torch. Siempre re-ejecutar el paso 2 después de instalar TTS.
+- **Versión de transformers:** Coqui TTS 0.22 requiere `transformers<4.44` (fijado en pyproject.toml). Versiones más nuevas eliminan `BeamSearchScorer` que TTS necesita.
+- **torch.load weights_only:** torch 2.6+ usa `weights_only=True` por defecto, incompatible con archivos de modelo XTTS. Parcheado en `tts_xtts.py`.
 
 ---
 
-## Configuration
+## Configuración
 
-All settings in `config.yaml`:
+Toda la configuración en `config.yaml`:
 
 ```yaml
 prompt:
-  system: "Personality"
+  system: "Personalidad"
 
 models:
   llm:
@@ -161,13 +166,18 @@ models:
     # LM Studio / OpenRouter
     base_url: "http://localhost:1234/v1"
     model_name: "default"
-    api_key: ""                    # OpenRouter only
+    api_key: ""                    # Solo OpenRouter
   stt:
     model_size: "large-v3"
     language: "es"
   tts:
+    backend: "edge"                # "xtts" | "edge"
     voice_path: "./voices/female_01.wav"
     chunk_size: 150
+    # Edge TTS (solo si backend: "edge")
+    edge_voice: "es-MX-DaliaNeural"
+    edge_rate: "+0%"
+    edge_pitch: "+0Hz"
 
 rag:
   enabled: true
@@ -181,11 +191,11 @@ osc:
 
 ---
 
-## LLM backends
+## Backends de LLM
 
-### llamacpp (default)
+### llamacpp (por defecto)
 
-Runs locally using llama-cpp-python. Requires a GGUF model file and `pip install llama-cpp-python`.
+Corre localmente usando llama-cpp-python. Requiere un archivo GGUF y `pip install llama-cpp-python`.
 
 ```yaml
 backend: "llamacpp"
@@ -194,10 +204,10 @@ path: "./models/llama-3-8b.gguf"
 
 ### lmstudio
 
-Uses LM Studio's local OpenAI-compatible server. No compilation needed.
+Usa el servidor local de LM Studio compatible con la API de OpenAI. No necesita compilación.
 
-1. Install [LM Studio](https://lmstudio.ai/), load a model, start local server
-2. Configure:
+1. Instalar [LM Studio](https://lmstudio.ai/), cargar un modelo, iniciar el servidor local
+2. Configurar:
 
 ```yaml
 backend: "lmstudio"
@@ -206,35 +216,62 @@ base_url: "http://localhost:1234/v1"
 
 ### openrouter
 
-Cloud access to hundreds of models via [OpenRouter](https://openrouter.ai/).
+Acceso en la nube a cientos de modelos vía [OpenRouter](https://openrouter.ai/).
 
-1. Get an API key from openrouter.ai
-2. Configure:
+1. Obtener una API key en openrouter.ai
+2. Configurar:
 
 ```yaml
 backend: "openrouter"
 base_url: "https://openrouter.ai/api/v1"
 model_name: "meta-llama/llama-3-8b-instruct"
-api_key: "sk-or-..."       # or env OPENROUTER_API_KEY
+api_key: "sk-or-..."       # o env OPENROUTER_API_KEY
 ```
 
 ---
 
-## Usage
+## Backends de TTS
+
+### xtts
+
+Coqui TTS (XTTS v2). Síntesis local con clonación de voz. Requiere GPU y modelo (~2 GB VRAM).
+
+```yaml
+backend: "xtts"
+voice_path: "./voices/female_01.wav"
+chunk_size: 150
+```
+
+### edge
+
+Microsoft Edge TTS. Servicio online, **no requiere GPU, modelo local ni API key**. Solo necesita conexión a internet.
+
+```yaml
+backend: "edge"
+edge_voice: "es-MX-DaliaNeural"    # edge-tts --list-voices para ver todas
+edge_rate: "+0%"                    # Velocidad: "+20%", "-10%", etc.
+edge_pitch: "+0Hz"                  # Tono: "+10Hz", "-10Hz", etc.
+```
+
+Listar voces disponibles: `edge-tts --list-voices`
+
+---
+
+## Uso
 
 ```bash
 .venv/Scripts/python -m mia.main
 ```
 
-Note: prefer running via venv python directly. `uv run mia` may re-resolve dependencies and overwrite CUDA torch with CPU torch.
+Nota: preferir ejecutar directamente con el python del venv. `uv run mia` puede re-resolver dependencias y sobreescribir CUDA torch con la versión CPU.
 
 ### VTube Studio
 
-Enable OSC receiver in VTube Studio on port 9000. Parameters `MouthOpen` and `EyeBlink` update automatically.
+Habilitar el receptor OSC en VTube Studio en el puerto 9000. Los parámetros `MouthOpen` y `EyeBlink` se actualizan automáticamente.
 
 ### WebSocket
 
-Server at `ws://127.0.0.1:8765`. Messages:
+Servidor en `ws://127.0.0.1:8765`. Mensajes:
 
 ```json
 {"type": "mouth", "value": 0.42}
@@ -245,9 +282,9 @@ Server at `ws://127.0.0.1:8765`. Messages:
 
 ---
 
-## RAG memory
+## Memoria RAG
 
-ChromaDB with `all-MiniLM-L6-v2` embeddings. Stores conversation pairs, retrieves relevant context per query, injects into LLM prompt. Persistent in `./data/chroma_db/`. Disable with `rag.enabled: false`.
+ChromaDB con embeddings `all-MiniLM-L6-v2`. Almacena pares de conversación, recupera contexto relevante por consulta e inyecta en el prompt del LLM. Persistente en `./data/chroma_db/`. Desactivar con `rag.enabled: false`.
 
 ---
 
@@ -257,26 +294,26 @@ ChromaDB with `all-MiniLM-L6-v2` embeddings. Stores conversation pairs, retrieve
 .venv/Scripts/python -m pytest -v
 ```
 
-Covers: config loading, prompt construction, text chunking, VAD, lipsync, RAG.
+Cubre: carga de configuración, construcción de prompt, chunking de texto, VAD, lipsync, RAG.
 
 ---
 
 ## Stack
 
-| Component | Technology                          |
-|-----------|-------------------------------------|
-| STT       | faster-whisper (CTranslate2)        |
-| LLM       | llama-cpp-python / LM Studio / OpenRouter |
-| TTS       | Coqui TTS (XTTS v2)                |
-| VAD       | Energy-based (RMS)                  |
-| Lipsync   | RMS with exponential smoothing      |
-| Avatar    | VTube Studio (OSC) / WebSocket      |
-| Memory    | ChromaDB + sentence-transformers    |
-| Audio     | sounddevice (PortAudio)             |
-| Config    | YAML -> typed dataclasses           |
+| Componente | Tecnología                              |
+|------------|-----------------------------------------|
+| STT        | faster-whisper (CTranslate2)            |
+| LLM        | llama-cpp-python / LM Studio / OpenRouter |
+| TTS        | Coqui TTS (XTTS v2) / Edge TTS         |
+| VAD        | Basado en energía (RMS)                 |
+| Lipsync    | RMS con suavizado exponencial           |
+| Avatar     | VTube Studio (OSC) / WebSocket          |
+| Memoria    | ChromaDB + sentence-transformers        |
+| Audio      | sounddevice (PortAudio)                 |
+| Config     | YAML -> dataclasses tipados             |
 
 ---
 
-## License
+## Licencia
 
 [GNU Affero General Public License v3.0](LICENSE)
