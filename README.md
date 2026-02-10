@@ -7,6 +7,30 @@ Local VTuber assistant pipeline. Low latency, RAG memory, VTube Studio integrati
 
 ---
 
+## Hardware requirements
+
+### Full local (llamacpp + STT + TTS)
+
+Everything runs on your machine. Needs a dedicated GPU.
+
+| Resource | Minimum            | Recommended             |
+|----------|--------------------|-------------------------|
+| RAM      | 16 GB              | 32 GB                   |
+| VRAM     | 6 GB (8B Q4)       | 12 GB+ (larger models)  |
+| GPU      | NVIDIA GTX 1060    | NVIDIA RTX 3060+        |
+| Disk     | ~10 GB (models)    | ~15 GB                  |
+| CPU      | 4 cores            | 8+ cores                |
+
+Breakdown by component:
+- **STT** (faster-whisper large-v3): ~3 GB VRAM, ~3 GB disk
+- **LLM** (8B Q4_K_M): ~5 GB VRAM, ~5 GB disk
+- **TTS** (XTTS v2): ~2 GB VRAM, ~2 GB disk
+- **RAG** (MiniLM-L6): ~0.5 GB RAM, ~80 MB disk
+
+### CPU-only mode (no GPU)
+
+Possible but significantly slower. Set `device: "cpu"` in STT/TTS config and `n_gpu_layers: 0` for LLM. Expect 5-10x higher latency.
+
 ## Overview
 
 Voice-to-avatar pipeline with streaming at every stage:
