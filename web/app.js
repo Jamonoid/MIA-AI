@@ -2,8 +2,9 @@
  * MIA – WebUI Client
  *
  * Conexión WebSocket bidireccional con el pipeline de MIA.
- * Recibe: status, subtítulos, métricas, logs, mouth, emotion.
- * Envía: comandos (mute, pause, toggle RAG/vision, chat text, TTS config).
+ * Recibe: status, subtítulos, métricas, logs, mouth, emotion, audio-response.
+ * Envía: comandos (mute, pause, toggle RAG/vision, chat text, TTS config,
+ *        interrupt, set_audio_output).
  */
 
 // ── Config ────────────────────────────────
@@ -14,6 +15,7 @@ const RECONNECT_DELAY = 3000;
 let ws = null;
 let logFilter = "all";
 let conversationActive = false;
+let audioOutput = "frontend"; // "frontend" or "discord"
 
 const state = {
     muted: false,
@@ -29,6 +31,23 @@ const wsIndicator = $("#ws-indicator");
 const chatMessages = $("#chat-messages");
 const chatInput = $("#chat-input");
 const logOutput = $("#log-output");
+const interruptBtn = $("#btn-interrupt");
+const audioOverlay = $("#audio-overlay");
+
+// ── Audio Activation Overlay ──────────────
+// Browsers block AudioContext until user gesture. One click dismisses.
+function dismissAudioOverlay() {
+    audioOverlay.classList.add("hidden");
+    getAudioContext(); // warm up AudioContext
+}
+
+audioOverlay.addEventListener("click", dismissAudioOverlay);
+// Also dismiss on any interaction with the page body
+document.addEventListener("click", () => {
+    if (!audioOverlay.classList.contains("hidden")) {
+        dismissAudioOverlay();
+    }
+}, { once: true });
 
 // ── WebSocket ─────────────────────────────
 
@@ -39,6 +58,8 @@ function connect() {
         wsIndicator.className = "ws-dot online";
         addLog("Conectado al pipeline", "info");
         updateBadge("listening");
+        // Tell backend our audio output preference
+        send({ type: "command", action: "set_audio_output", value: audioOutput });
     };
 
     ws.onclose = () => {
@@ -77,7 +98,11 @@ function handleMessage(data) {
             break;
 
         case "subtitle":
-            addChatMessage(data.text, data.role || "assistant");
+            // Only show assistant subtitles — user messages already added by
+            // sendChat() (text) or user-input-transcription (mic)
+            if ((data.role || "assistant") === "assistant") {
+                addChatMessage(data.text, "assistant");
+            }
             break;
 
         case "mouth":
@@ -120,8 +145,8 @@ function handleMessage(data) {
             break;
 
         case "audio-response":
-            // Audio chunk from TTS — decode and queue for playback
-            if (data.audio) {
+            // Audio chunk from TTS — play in browser only if output is frontend
+            if (data.audio && audioOutput === "frontend") {
                 queueAudioChunk(data.audio);
             }
             if (data.display_text) {
@@ -130,12 +155,17 @@ function handleMessage(data) {
             break;
 
         case "backend-synth-complete":
-            // Backend finished sending all audio — wait for playback queue to drain
+            // Backend finished sending all audio
             addLog("Backend synth complete, waiting for audio playback...", "debug");
-            waitForAudioQueueDrain().then(() => {
+            if (audioOutput === "frontend") {
+                waitForAudioQueueDrain().then(() => {
+                    send({ type: "frontend-playback-complete" });
+                    addLog("Frontend playback complete", "debug");
+                });
+            } else {
+                // In discord mode, signal immediately — Discord handles its own playback
                 send({ type: "frontend-playback-complete" });
-                addLog("Frontend playback complete", "debug");
-            });
+            }
             break;
 
         case "force-new-message":
@@ -144,7 +174,7 @@ function handleMessage(data) {
 
         case "interrupt-signal":
             addLog("Conversación interrumpida", "info");
-            conversationActive = false;
+            setConversationActive(false);
             clearAudioQueue();
             break;
 
@@ -160,13 +190,25 @@ function handleMessage(data) {
 function handleControl(action) {
     switch (action) {
         case "conversation-chain-start":
-            conversationActive = true;
+            setConversationActive(true);
             addLog("Conversación iniciada", "debug");
             break;
         case "conversation-chain-end":
-            conversationActive = false;
+            setConversationActive(false);
             addLog("Conversación finalizada", "debug");
             break;
+    }
+}
+
+// ── Conversation State ────────────────────
+
+function setConversationActive(active) {
+    conversationActive = active;
+    interruptBtn.disabled = !active;
+    if (active) {
+        interruptBtn.classList.add("active");
+    } else {
+        interruptBtn.classList.remove("active");
     }
 }
 
@@ -258,6 +300,34 @@ function updateToggle(btnId, active, stateId, label) {
 
 // ── Event Listeners ───────────────────────
 
+// Interrupt button
+interruptBtn.addEventListener("click", () => {
+    if (conversationActive) {
+        send({ type: "interrupt" });
+        addLog("Interrupción enviada", "info");
+        clearAudioQueue();
+    }
+});
+
+// Audio output toggle
+function setAudioOutput(output) {
+    audioOutput = output;
+    // Update UI
+    $("#btn-output-frontend").classList.toggle("active", output === "frontend");
+    $("#btn-output-discord").classList.toggle("active", output === "discord");
+    // Tell backend
+    send({ type: "command", action: "set_audio_output", value: output });
+    addLog(`Salida de audio: ${output === "frontend" ? "Browser 🔊" : "Discord 🎧"}`, "info");
+
+    // Clear any queued audio when switching
+    if (output === "discord") {
+        clearAudioQueue();
+    }
+}
+
+$("#btn-output-frontend").addEventListener("click", () => setAudioOutput("frontend"));
+$("#btn-output-discord").addEventListener("click", () => setAudioOutput("discord"));
+
 // Control buttons
 $("#btn-mute").addEventListener("click", () => {
     state.muted = !state.muted;
@@ -290,6 +360,10 @@ function sendChat() {
     addChatMessage(text, "user");
     send({ type: "text-input", text });
     chatInput.value = "";
+    // Dismiss overlay on first interaction
+    if (!audioOverlay.classList.contains("hidden")) {
+        dismissAudioOverlay();
+    }
 }
 
 chatInput.addEventListener("keydown", (e) => {
@@ -331,6 +405,7 @@ let audioCtx = null;
 const audioQueue = [];
 let isPlayingAudio = false;
 let drainResolvers = [];
+let currentSource = null; // Track current playing source for interrupt
 
 function getAudioContext() {
     if (!audioCtx) {
@@ -352,6 +427,7 @@ function queueAudioChunk(base64Audio) {
 async function playNextInQueue() {
     if (audioQueue.length === 0) {
         isPlayingAudio = false;
+        currentSource = null;
         // Resolve all drain waiters
         const resolvers = drainResolvers.splice(0);
         resolvers.forEach(r => r());
@@ -369,11 +445,12 @@ async function playNextInQueue() {
             bytes[i] = binary.charCodeAt(i);
         }
 
-        const audioBuffer = await ctx.decodeAudioData(bytes.buffer);
+        const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
         const source = ctx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(ctx.destination);
         source.onended = () => playNextInQueue();
+        currentSource = source;
         source.start(0);
     } catch (err) {
         addLog(`Error playing audio: ${err.message}`, "error");
@@ -392,6 +469,14 @@ function waitForAudioQueueDrain() {
 
 function clearAudioQueue() {
     audioQueue.length = 0;
+    // Stop currently playing source
+    if (currentSource) {
+        try {
+            currentSource.onended = null; // Prevent chaining
+            currentSource.stop();
+        } catch (e) { /* already stopped */ }
+        currentSource = null;
+    }
     isPlayingAudio = false;
     drainResolvers.splice(0).forEach(r => r());
 }

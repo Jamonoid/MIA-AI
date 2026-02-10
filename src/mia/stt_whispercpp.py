@@ -35,21 +35,31 @@ class WhisperSTT:
             from faster_whisper import WhisperModel
 
             device = self.device
+            compute = self.compute_type
+
             if device == "auto":
-                import torch
-                device = "cuda" if torch.cuda.is_available() else "cpu"
+                # Usar CTranslate2 nativo (no PyTorch) para detectar CUDA
+                import ctranslate2
+                if ctranslate2.get_cuda_device_count() > 0:
+                    device = "cuda"
+                else:
+                    device = "cpu"
+                    # int8 no soportado en CPU sin extensiones AVX
+                    if compute in ("int8", "int8_float16"):
+                        compute = "float32"
+                        logger.info("CPU detectada, cambiando compute_type a float32")
 
             logger.info(
                 "Cargando Whisper model=%s, device=%s, compute=%s",
                 self.model_size,
                 device,
-                self.compute_type,
+                compute,
             )
 
             self._model = WhisperModel(
                 self.model_size,
                 device=device,
-                compute_type=self.compute_type,
+                compute_type=compute,
             )
 
             logger.info("Whisper STT cargado correctamente")

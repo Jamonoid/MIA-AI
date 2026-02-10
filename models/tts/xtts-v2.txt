@@ -1,8 +1,0 @@
-# XTTS v2 (Coqui TTS)
-# Este modelo se descarga automáticamente al ejecutar MIA.
-# Repo: https://huggingface.co/coqui/XTTS-v2
-# Tamaño aprox: ~2 GB
-# Se almacena en cache de TTS (~/.local/share/tts/)
-#
-# Requiere un archivo WAV de referencia de voz en ../voices/
-# El WAV debe ser ~10 segundos de voz limpia, mono, 22050 Hz.

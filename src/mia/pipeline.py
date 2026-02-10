@@ -47,6 +47,8 @@ class MIAPipeline:
         self._ws = None
         self._rag = None
         self._conversation_handler = None
+        self._discord_bot = None
+        self._audio_mode = "frontend"  # "frontend" or "discord"
 
     # ──────────────────────────────────────────
     # Inicialización
@@ -168,20 +170,13 @@ class MIAPipeline:
 
         # TTS – seleccionar backend
         tts_backend = self.config.tts.backend.lower()
-        if tts_backend == "edge":
-            from .tts_edge import EdgeTTS
+        from .tts_edge import EdgeTTS
 
-            self._tts = EdgeTTS(self.config.tts)
-            self._tts.load()
-            logger.info(
-                "TTS backend: Edge TTS (voice=%s)", self.config.tts.edge_voice
-            )
-        else:
-            from .tts_xtts import XTTS
-
-            self._tts = XTTS(self.config.tts)
-            self._tts.load()
-            logger.info("TTS backend: XTTS v2")
+        self._tts = EdgeTTS(self.config.tts)
+        self._tts.load()
+        logger.info(
+            "TTS backend: Edge TTS (voice=%s)", self.config.tts.edge_voice
+        )
 
         elapsed = (time.perf_counter() - t0) * 1000
         logger.info("═══ Módulos cargados en %.1f ms ═══", elapsed)
@@ -208,7 +203,22 @@ class MIAPipeline:
 
         # Registrar con WSServer para despacho de mensajes WebSocket
         self._ws.set_conversation_handler(self._conversation_handler)
+        # Registrar callback para cambio de modo de audio
+        self._ws._on_audio_mode_change = self.set_audio_mode
         logger.info("ConversationHandler registrado")
+
+        # ── Discord Bot (config check only, bot created in run()) ──
+        if self.config.discord.enabled:
+            import os
+            token = os.getenv("DISCORD_BOT_TOKEN", "")
+            if not token:
+                logger.warning(
+                    "Discord habilitado pero DISCORD_BOT_TOKEN no encontrado. "
+                    "Crear archivo .env con DISCORD_BOT_TOKEN=tu_token"
+                )
+            else:
+                self._discord_token = token
+                logger.info("Discord bot se creará al iniciar (para usar el event loop correcto)")
 
     # ──────────────────────────────────────────
     # Loop principal
@@ -224,6 +234,36 @@ class MIAPipeline:
         self._blink_ctrl.start()
         await self._ws.start()
 
+        # Crear e iniciar Discord bot DENTRO del async context
+        # (py-cord almacena asyncio.get_event_loop() en Bot.__init__,
+        #  así que debe crearse dentro de asyncio.run() para tener el loop correcto)
+        discord_task = None
+        if hasattr(self, '_discord_token') and self._discord_token:
+            from .discord_bot import MIADiscordBot
+
+            self._discord_bot = MIADiscordBot(
+                conversation_handler=self._conversation_handler,
+                stt=self._stt,
+                tts=self._tts,
+                llm=self._llm,
+                rag=self._rag,
+                audio_player=self._audio_player,
+                lipsync=self._lipsync,
+                osc=self._osc,
+                ws_server=self._ws,
+                executor=self._executor,
+                chat_history=self._chat_history,
+                config=self.config,
+            )
+            # Re-register audio mode callback now that bot exists
+            self._ws._on_audio_mode_change = self.set_audio_mode
+            logger.info("Discord bot inicializado ✓")
+
+            discord_task = asyncio.create_task(
+                self._discord_bot.start(self._discord_token)
+            )
+            logger.info("Discord bot iniciando...")
+
         logger.info("🎤 MIA escuchando... (Ctrl+C para detener)")
 
         if self._ws.enabled:
@@ -235,11 +275,45 @@ class MIAPipeline:
         except asyncio.CancelledError:
             pass
         finally:
+            if discord_task and not discord_task.done():
+                discord_task.cancel()
             await self.shutdown()
+
+    async def set_audio_mode(self, mode: str) -> None:
+        """Switch audio mode between 'frontend' and 'discord'.
+
+        - frontend: local mic → STT → LLM → TTS → browser audio
+        - discord: Discord voice → STT → LLM → TTS → Discord voice
+        """
+        if mode not in ("frontend", "discord"):
+            logger.warning("Audio mode desconocido: %s", mode)
+            return
+
+        old_mode = self._audio_mode
+        self._audio_mode = mode
+        logger.info("Audio mode: %s → %s", old_mode, mode)
+
+        if mode == "discord":
+            # Mute local mic (stop capturing)
+            self._audio_capture.muted = True
+            # Enable Discord voice receive
+            if self._discord_bot:
+                await self._discord_bot.enable_voice_receive()
+        else:
+            # Unmute local mic
+            self._audio_capture.muted = False
+            # Disable Discord voice receive
+            if self._discord_bot:
+                await self._discord_bot.disable_voice_receive()
 
     async def _listen_and_respond(self) -> None:
         """Un ciclo: escuchar → detectar fin de habla → delegar a conversation_handler."""
         loop = asyncio.get_event_loop()
+
+        # ── Skip local mic capture in Discord mode ──
+        if self._audio_mode == "discord":
+            await asyncio.sleep(0.2)  # Yield, Discord bot handles voice
+            return
 
         # ── 0. Si hay conversación activa, esperar sin capturar audio ──
         if self._conversation_handler and self._ws.enabled:
@@ -380,7 +454,7 @@ class MIAPipeline:
             await self._ws.send_subtitle(full_response, role="assistant")
 
         # Sintetizar y reproducir por chunks
-        from .tts_xtts import chunk_text
+        from .tts_edge import chunk_text
 
         text_chunks = chunk_text(full_response, chunk_size)
 
@@ -459,6 +533,13 @@ class MIAPipeline:
         """Apaga todos los componentes limpiamente."""
         logger.info("Apagando MIA...")
         self._running = False
+
+        # Discord
+        if self._discord_bot:
+            try:
+                await self._discord_bot.close()
+            except Exception as e:
+                logger.debug("Error cerrando Discord bot: %s", e)
 
         if self._blink_ctrl:
             self._blink_ctrl.stop()

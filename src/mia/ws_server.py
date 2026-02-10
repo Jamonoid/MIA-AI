@@ -43,6 +43,10 @@ class WSServer:
         self._client_uids: dict[Any, str] = {}
         # client_uid → websocket mapping (para send_to_client)
         self._uid_to_ws: dict[str, Any] = {}
+        # client_uid → audio output preference ("frontend" or "discord")
+        self._audio_output_prefs: dict[str, str] = {}
+        # Callback for audio mode changes (set by pipeline)
+        self._on_audio_mode_change: Any = None
 
     async def start(self) -> None:
         """Inicia el servidor WebSocket y opcionalmente el HTTP para WebUI."""
@@ -136,7 +140,10 @@ class WSServer:
             await self._server.wait_closed()
             logger.info("WebSocket server detenido")
         if self._http_server:
-            await self._http_server.cleanup()
+            try:
+                await self._http_server.cleanup()
+            except Exception:
+                pass
             logger.info("HTTP server detenido")
 
     def set_conversation_handler(
@@ -167,6 +174,7 @@ class WSServer:
             self._clients.discard(websocket)
             self._client_uids.pop(websocket, None)
             self._uid_to_ws.pop(client_uid, None)
+            self._audio_output_prefs.pop(client_uid, None)
 
             # Limpiar waiters del message_handler
             from .conversations.message_handler import message_handler
@@ -225,10 +233,30 @@ class WSServer:
                 )
             return
 
-        # ── Comandos legacy (command, chat) ──
-        if msg_type in ("command", "chat"):
+        # ── Comandos de configuración ──
+        if msg_type == "command":
+            action = data.get("action")
+            if action == "set_audio_output":
+                value = data.get("value", "frontend")
+                self._audio_output_prefs[client_uid] = value
+                logger.info(
+                    "Audio output para %s: %s", client_uid, value
+                )
+                # Notify pipeline to switch audio mode
+                if self._on_audio_mode_change:
+                    asyncio.create_task(
+                        self._on_audio_mode_change(value)
+                    )
+                return
+            # Resto de comandos → cola del pipeline
             await self._command_queue.put(data)
             logger.debug("Comando encolado: %s", data)
+            return
+
+        # ── Chat legacy ──
+        if msg_type == "chat":
+            await self._command_queue.put(data)
+            logger.debug("Chat encolado: %s", data)
 
     async def get_command(self) -> dict[str, Any]:
         """Obtiene el siguiente comando del WebUI (blocking)."""
@@ -305,3 +333,11 @@ class WSServer:
     async def send_config_state(self, **kwargs: Any) -> None:
         """Envía estado actual de configuración (muted, paused, rag, vision)."""
         await self.broadcast({"type": "config_state", **kwargs})
+
+    def get_audio_output(self, client_uid: str) -> str:
+        """Retorna la preferencia de salida de audio del cliente.
+
+        Returns:
+            'frontend' (play in browser) or 'discord' (play in voice channel).
+        """
+        return self._audio_output_prefs.get(client_uid, "frontend")

@@ -1,94 +1,49 @@
 # MIA-AI
 
-Pipeline de asistente VTuber local. Baja latencia, memoria RAG, integración con VTube Studio vía OSC.
+Asistente VTuber local con baja latencia, memoria conversacional RAG, y animación de avatar en tiempo real. Se integra con VTube Studio vía OSC y ofrece un WebUI para monitoreo y control. Soporta entrada de audio por micrófono local y Discord (próximamente).
 
-**Python:** 3.11+  
+**Python:** 3.11+
 **Estado:** Alpha
+**Licencia:** [AGPL-3.0](LICENSE)
 
 ---
 
-## Requisitos de hardware
+## ¿Qué es MIA?
 
-### Local completo (llamacpp + STT + TTS XTTS)
+MIA es un pipeline de voz-a-avatar que convierte lo que dices en respuestas habladas con animación facial sincronizada:
 
-Todo corre en tu PC. Necesita una GPU NVIDIA dedicada.
+```
+Mic → VAD → STT → RAG → LLM (stream) → TTS (chunked) → Audio + Lipsync → Avatar
+```
 
-| Recurso  | Mínimo             | Recomendado             |
-|----------|---------------------|-------------------------|
-| RAM      | 16 GB               | 32 GB                   |
-| VRAM     | 6 GB (8B Q4)        | 12 GB+ (modelos mayores)|
-| GPU      | NVIDIA GTX 1060     | NVIDIA RTX 3060+        |
-| Disco    | ~10 GB (modelos)    | ~15 GB                  |
-| CPU      | 4 núcleos           | 8+ núcleos              |
+### Características
 
-Desglose por componente:
-- **STT** (faster-whisper large-v3): ~3 GB VRAM, ~3 GB disco
-- **LLM** (8B Q4_K_M): ~5 GB VRAM, ~5 GB disco
-- **TTS** (XTTS v2): ~2 GB VRAM, ~2 GB disco
-- **RAG** (MiniLM-L6): ~0.5 GB RAM, ~80 MB disco
-
-### Modo sin GPU (TTS Edge)
-
-Con `backend: "edge"` en la sección TTS, se usa el servicio online de Microsoft Edge, que **no requiere GPU ni modelo local**. Solo necesita conexión a internet.
-
-### Modo CPU (sin GPU, XTTS)
-
-Posible pero significativamente más lento. Configurar `device: "cpu"` en STT/TTS y `n_gpu_layers: 0` en LLM. Esperar 5-10x más latencia.
+- **Baja latencia**: streaming end-to-end, TTS paralelo con entrega ordenada
+- **Memoria RAG**: ChromaDB con embeddings para contexto conversacional persistente
+- **3 backends LLM**: llama-cpp-python (local), LM Studio, OpenRouter (nube)
+- **2 backends TTS**: XTTS v2 (local, clonación de voz) o Edge TTS (online, sin GPU)
+- **Prompt modular**: archivos `.md` en `prompts/` que se concatenan automáticamente
+- **WebUI**: panel de control con subtítulos, métricas, chat escrito, logs filtrables
+- **VTube Studio**: lipsync + blink automático vía OSC
+- **Sistema de turnos**: conversaciones como `asyncio.Task` con interrupciones y sincronización frontend↔backend
+- **Discord** *(próximamente)*: escucha en voice channels, identifica quién habla, responde por voz
 
 ---
 
-## Resumen
+## Requisitos
 
-Pipeline de voz-a-avatar con streaming en cada etapa:
+### Con GPU (recomendado)
 
-```
-Mic -> VAD -> STT -> RAG -> LLM (stream) -> TTS (chunked) -> Audio
-                                                |
-                                          Lipsync -> OSC / WebSocket
-```
+| Recurso | Mínimo | Recomendado |
+|---------|--------|-------------|
+| RAM | 16 GB | 32 GB |
+| VRAM | 6 GB | 12 GB+ |
+| GPU | NVIDIA GTX 1060 | RTX 3060+ |
+| Disco | ~10 GB | ~15 GB |
 
-### Metas de latencia
+### Sin GPU
 
-| Etapa                | Objetivo   |
-|----------------------|------------|
-| Primer token LLM     | < 300 ms   |
-| Primera salida de voz | < 900 ms   |
-| Tasa de lipsync       | 50-100 Hz  |
-| Búsqueda RAG          | < 50 ms    |
-
----
-
-## Estructura del proyecto
-
-```
-src/mia/
-    main.py               Punto de entrada
-    config.py              YAML -> dataclasses tipados
-    pipeline.py            Orquestador asíncrono
-
-    audio_io.py            Captura de mic + cola de reproducción
-    vad.py                 Detección de actividad vocal (energía)
-    stt_whispercpp.py      STT (faster-whisper)
-    llm_llamacpp.py        LLM local (llama-cpp-python)
-    llm_lmstudio.py        LLM vía LM Studio (API OpenAI)
-    llm_openrouter.py      LLM vía OpenRouter (nube)
-    tts_xtts.py            TTS con chunking (XTTS v2)
-    tts_edge.py            TTS con Microsoft Edge (edge-tts)
-    rag_memory.py          Memoria conversacional (ChromaDB)
-
-    lipsync.py             RMS -> mouth_open (0..1)
-    vtube_osc.py           OSC hacia VTube Studio
-    ws_server.py           WebSocket broadcast (JSON)
-
-models/
-    stt/                   faster-whisper-large-v3 (descarga automática)
-    tts/                   XTTS v2 (descarga automática)
-
-voices/                    WAV de referencia para clonación de voz (~10s)
-data/chroma_db/            Vector store persistente (auto-generado)
-tests/                     Tests unitarios
-config.yaml                Toda la configuración
-```
+Con `backend: "edge"` para TTS y un LLM remoto (LM Studio u OpenRouter), MIA funciona sin GPU dedicada. Solo necesita conexión a internet.
 
 ---
 
@@ -105,8 +60,6 @@ uv pip install -e ".[dev]"
 
 ### 2. Instalar PyTorch con CUDA
 
-PyPI solo distribuye torch CPU. Para soporte GPU:
-
 ```bash
 uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
@@ -121,170 +74,124 @@ Verificar:
 ```bash
 uv pip install faster-whisper
 uv pip install TTS
+# Re-instalar CUDA torch (TTS sobreescribe con CPU):
+uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-**Importante:** `TTS` puede instalar torch CPU como dependencia, sobreescribiendo la versión CUDA. Después de instalar TTS, re-ejecutar el paso 2.
-
-Para LLM local con llama-cpp-python (solo si usas `backend: "llamacpp"`):
+Para LLM local (opcional):
 ```bash
 uv pip install llama-cpp-python
 ```
 
-### 4. Modelos
+### 4. Configurar
 
-| Componente | Modelo                   | Ubicación                       |
-|------------|--------------------------|---------------------------------|
-| LLM        | Cualquier GGUF (ej. Llama 3) | `./models/llama-3-8b.gguf` |
-| STT        | faster-whisper large-v3  | Descarga automática             |
-| TTS        | XTTS v2                  | Descarga automática             |
-| Voz        | WAV de referencia (~10s) | `./voices/female_01.wav`        |
-
-### Problemas conocidos
-
-- **Conflicto de versión de torch:** `TTS` instala torch CPU desde PyPI, sobreescribiendo CUDA torch. Siempre re-ejecutar el paso 2 después de instalar TTS.
-- **Versión de transformers:** Coqui TTS 0.22 requiere `transformers<4.44` (fijado en pyproject.toml). Versiones más nuevas eliminan `BeamSearchScorer` que TTS necesita.
-- **torch.load weights_only:** torch 2.6+ usa `weights_only=True` por defecto, incompatible con archivos de modelo XTTS. Parcheado en `tts_xtts.py`.
-
----
-
-## Configuración
-
-Toda la configuración en `config.yaml`:
-
-```yaml
-prompt:
-  system: "Personalidad"
-
-models:
-  llm:
-    backend: "llamacpp"            # llamacpp | lmstudio | openrouter
-    path: "./models/llama-3-8b.gguf"
-    context_size: 2048
-    max_tokens: 512
-    temperature: 0.7
-    n_gpu_layers: -1
-    # LM Studio / OpenRouter
-    base_url: "http://localhost:1234/v1"
-    model_name: "default"
-    api_key: ""                    # Solo OpenRouter
-  stt:
-    model_size: "large-v3"
-    language: "es"
-  tts:
-    backend: "edge"                # "xtts" | "edge"
-    voice_path: "./voices/female_01.wav"
-    chunk_size: 150
-    # Edge TTS (solo si backend: "edge")
-    edge_voice: "es-MX-DaliaNeural"
-    edge_rate: "+0%"
-    edge_pitch: "+0Hz"
-
-rag:
-  enabled: true
-  top_k: 3
-  max_docs: 5000
-
-osc:
-  ip: "127.0.0.1"
-  port: 9000
+```bash
+cp config.example.yaml config.yaml
+# Editar config.yaml con tu configuración
 ```
 
----
-
-## Backends de LLM
-
-### llamacpp (por defecto)
-
-Corre localmente usando llama-cpp-python. Requiere un archivo GGUF y `pip install llama-cpp-python`.
-
-```yaml
-backend: "llamacpp"
-path: "./models/llama-3-8b.gguf"
-```
-
-### lmstudio
-
-Usa el servidor local de LM Studio compatible con la API de OpenAI. No necesita compilación.
-
-1. Instalar [LM Studio](https://lmstudio.ai/), cargar un modelo, iniciar el servidor local
-2. Configurar:
-
-```yaml
-backend: "lmstudio"
-base_url: "http://localhost:1234/v1"
-```
-
-### openrouter
-
-Acceso en la nube a cientos de modelos vía [OpenRouter](https://openrouter.ai/).
-
-1. Obtener una API key en openrouter.ai
-2. Configurar:
-
-```yaml
-backend: "openrouter"
-base_url: "https://openrouter.ai/api/v1"
-model_name: "meta-llama/llama-3-8b-instruct"
-api_key: "sk-or-..."       # o env OPENROUTER_API_KEY
-```
-
----
-
-## Backends de TTS
-
-### xtts
-
-Coqui TTS (XTTS v2). Síntesis local con clonación de voz. Requiere GPU y modelo (~2 GB VRAM).
-
-```yaml
-backend: "xtts"
-voice_path: "./voices/female_01.wav"
-chunk_size: 150
-```
-
-### edge
-
-Microsoft Edge TTS. Servicio online, **no requiere GPU, modelo local ni API key**. Solo necesita conexión a internet.
-
-```yaml
-backend: "edge"
-edge_voice: "es-MX-DaliaNeural"    # edge-tts --list-voices para ver todas
-edge_rate: "+0%"                    # Velocidad: "+20%", "-10%", etc.
-edge_pitch: "+0Hz"                  # Tono: "+10Hz", "-10Hz", etc.
-```
-
-Listar voces disponibles: `edge-tts --list-voices`
-
----
-
-## Uso
+### 5. Ejecutar
 
 ```bash
 .venv/Scripts/python -m mia.main
 ```
 
-Nota: preferir ejecutar directamente con el python del venv. `uv run mia` puede re-resolver dependencias y sobreescribir CUDA torch con la versión CPU.
+> **Nota:** No usar `uv run mia` — re-resuelve dependencias y puede sobreescribir CUDA torch con la versión CPU.
 
-### VTube Studio
+---
 
-Habilitar el receptor OSC en VTube Studio en el puerto 9000. Los parámetros `MouthOpen` y `EyeBlink` se actualizan automáticamente.
+## Estructura del proyecto
 
-### WebSocket
+```
+src/mia/
+    main.py                 Punto de entrada
+    config.py               YAML → dataclasses tipados
+    pipeline.py             Orquestador asíncrono principal
 
-Servidor en `ws://127.0.0.1:8765`. Mensajes:
+    audio_io.py             Captura de mic + cola de reproducción
+    vad.py                  Detección de actividad vocal (energía + pre-roll)
+    stt_whispercpp.py       STT (faster-whisper)
+    llm_llamacpp.py         LLM local (llama-cpp-python)
+    llm_lmstudio.py         LLM vía LM Studio (API OpenAI)
+    llm_openrouter.py       LLM vía OpenRouter (nube)
+    tts_xtts.py             TTS con chunking (XTTS v2)
+    tts_edge.py             TTS con Microsoft Edge (edge-tts)
+    rag_memory.py           Memoria conversacional (ChromaDB)
 
-```json
-{"type": "mouth", "value": 0.42}
-{"type": "emotion", "value": "happy"}
-{"type": "subtitle", "role": "assistant", "text": "Hola"}
-{"type": "status", "value": "listening"}
+    lipsync.py              RMS → mouth_open (0..1)
+    vtube_osc.py            OSC hacia VTube Studio
+    ws_server.py            WebSocket + servidor HTTP para WebUI
+
+    conversations/          Sistema de turnos de conversación
+      types.py              Type aliases y dataclasses compartidas
+      message_handler.py    Sincronización frontend↔backend
+      tts_manager.py        TTS paralelo con entrega ordenada
+      conversation_handler.py   Entry point: triggers → tasks
+      single_conversation.py    Flujo completo de un turno
+      conversation_utils.py     Helpers (señales, cleanup)
+
+prompts/                    Prompt modular (archivos .md)
+web/                        WebUI (HTML/CSS/JS)
+data/chroma_db/             Vector store persistente
+tests/                      Tests unitarios (33 tests)
+config.yaml                 Configuración central
 ```
 
 ---
 
-## Memoria RAG
+## Configuración
 
-ChromaDB con embeddings `all-MiniLM-L6-v2`. Almacena pares de conversación, recupera contexto relevante por consulta e inyecta en el prompt del LLM. Persistente en `./data/chroma_db/`. Desactivar con `rag.enabled: false`.
+Toda la configuración en `config.yaml`. Ver `config.example.yaml` como referencia.
+
+### Backends de LLM
+
+| Backend | Uso | Configuración |
+|---------|-----|---------------|
+| **llamacpp** | LLM local con GGUF | `backend: "llamacpp"`, `path: "./models/..."` |
+| **lmstudio** | LM Studio (API OpenAI) | `backend: "lmstudio"`, `base_url: "http://localhost:1234/v1"` |
+| **openrouter** | OpenRouter (nube) | `backend: "openrouter"`, `api_key: "sk-or-..."` |
+
+### Backends de TTS
+
+| Backend | Requiere GPU | Configuración |
+|---------|-------------|---------------|
+| **xtts** | Sí (~2 GB VRAM) | `backend: "xtts"`, necesita WAV de referencia |
+| **edge** | No (online) | `backend: "edge"`, `edge_voice: "es-CL-CatalinaNeural"` |
+
+Listar voces Edge disponibles: `edge-tts --list-voices`
+
+### Prompt modular
+
+En vez de un string en `prompt.system`, MIA carga archivos `.md` de la carpeta `prompts/`:
+
+```
+prompts/
+  personality.md    → Personalidad y estilo
+  expressions.md    → Instrucciones de expresiones faciales
+```
+
+Se concatenan alfabéticamente para armar el system prompt. Si la carpeta no existe, usa el fallback `prompt.system`.
+
+---
+
+## WebUI
+
+Panel de control accesible en `http://localhost:8080`:
+
+- Subtítulos en tiempo real (usuario + MIA)
+- Chat escrito (modo texto)
+- Métricas de latencia (STT, RAG, LLM, TTS)
+- Mute/unmute, pausa del pipeline
+- Toggle RAG on/off
+- Configuración TTS (voz, velocidad, tono)
+- Logs filtrables
+
+---
+
+## VTube Studio
+
+1. Habilitar receptor OSC en VTube Studio (puerto 9000)
+2. Los parámetros `MouthOpen` y `EyeBlink` se actualizan automáticamente
 
 ---
 
@@ -294,26 +201,32 @@ ChromaDB con embeddings `all-MiniLM-L6-v2`. Almacena pares de conversación, rec
 .venv/Scripts/python -m pytest -v
 ```
 
-Cubre: carga de configuración, construcción de prompt, chunking de texto, VAD, lipsync, RAG.
+33 tests cubriendo: configuración, prompts, chunking TTS, VAD, lipsync, RAG, MessageHandler, TTSTaskManager.
 
 ---
 
 ## Stack
 
-| Componente | Tecnología                              |
-|------------|-----------------------------------------|
-| STT        | faster-whisper (CTranslate2)            |
-| LLM        | llama-cpp-python / LM Studio / OpenRouter |
-| TTS        | Coqui TTS (XTTS v2) / Edge TTS         |
-| VAD        | Basado en energía (RMS)                 |
-| Lipsync    | RMS con suavizado exponencial           |
-| Avatar     | VTube Studio (OSC) / WebSocket          |
-| Memoria    | ChromaDB + sentence-transformers        |
-| Audio      | sounddevice (PortAudio)                 |
-| Config     | YAML -> dataclasses tipados             |
+| Componente | Tecnología |
+|------------|------------|
+| STT | faster-whisper (CTranslate2) |
+| LLM | llama-cpp-python / LM Studio / OpenRouter |
+| TTS | Coqui TTS (XTTS v2) / Edge TTS |
+| VAD | Energía (RMS) con pre-roll buffer |
+| Lipsync | RMS con suavizado exponencial |
+| Avatar | VTube Studio (OSC) / WebSocket |
+| Memoria | ChromaDB + sentence-transformers |
+| Audio | sounddevice (PortAudio) / Web Audio API |
+| WebUI | Vanilla HTML/CSS/JS |
+| Config | YAML → dataclasses tipados |
 
 ---
 
-## Licencia
+## Problemas conocidos
 
-[GNU Affero General Public License v3.0](LICENSE)
+| Problema | Solución |
+|----------|----------|
+| `TTS` instala torch CPU | Re-ejecutar paso 2 de instalación después |
+| `transformers>=4.44` rompe TTS | Fijado a `<4.44` en pyproject.toml |
+| `torch.load weights_only` | Parcheado automáticamente en `tts_xtts.py` |
+| Windows symlinks (Hugging Face) | Usar `HF_HUB_DISABLE_SYMLINKS=1` |

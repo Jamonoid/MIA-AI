@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,7 +10,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
+  <!-- Audio activation overlay (browsers block audio until user interacts) -->
+  <div id="audio-overlay" class="audio-overlay">
+    <div class="audio-overlay-content">
+      <span class="audio-overlay-icon">🔊</span>
+      <p>Haz clic para activar el audio</p>
+    </div>
+  </div>
+
   <div class="app">
     <!-- Header -->
     <header class="header">
@@ -21,6 +31,15 @@
         <span id="status-badge" class="badge badge-offline">desconectado</span>
       </div>
       <div class="header-right">
+        <!-- Audio output toggle -->
+        <div class="audio-output-toggle" id="audio-output-toggle" title="Salida de audio">
+          <button class="audio-toggle-btn active" data-output="frontend" id="btn-output-frontend">
+            🔊 <span>Browser</span>
+          </button>
+          <button class="audio-toggle-btn" data-output="discord" id="btn-output-discord">
+            🎧 <span>Discord</span>
+          </button>
+        </div>
         <span id="ws-indicator" class="ws-dot offline" title="WebSocket"></span>
       </div>
     </header>
@@ -32,7 +51,12 @@
       <section class="panel chat-panel" id="chat-panel">
         <div class="panel-header">
           <h2>💬 Chat</h2>
-          <button id="btn-clear-chat" class="btn-icon" title="Limpiar chat">🗑️</button>
+          <div class="chat-header-actions">
+            <button id="btn-interrupt" class="btn-interrupt" title="Interrumpir conversación" disabled>
+              ⏹️ Detener
+            </button>
+            <button id="btn-clear-chat" class="btn-icon" title="Limpiar chat">🗑️</button>
+          </div>
         </div>
         <div id="chat-messages" class="chat-messages"></div>
         <div class="chat-input-row">
@@ -153,4 +177,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>

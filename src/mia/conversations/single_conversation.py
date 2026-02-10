@@ -221,7 +221,7 @@ async def _generate_with_parallel_tts(
     loop = asyncio.get_event_loop()
 
     # Importar chunk_text para dividir la respuesta
-    from ..tts_xtts import chunk_text
+    from ..tts_edge import chunk_text
 
     # Generar texto completo del LLM en hilo
     def _generate() -> str:

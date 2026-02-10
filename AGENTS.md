@@ -1,399 +1,362 @@
 # AGENTS.md
 
-Guía para agentes (IA o humanos) que contribuyen al proyecto **MIA-AI** (Live2D) con foco en **latencia mínima**, sin Unity, integrable con VTube Studio vía OSC o con frontend propio. Incluye memoria RAG para contexto conversacional persistente.
+Guía para agentes (IA o humanos) que contribuyen al proyecto **MIA-AI**: un asistente VTuber local con baja latencia, memoria RAG, y animación de avatar en tiempo real.
 
 ---
 
 ## Objetivo del proyecto
 
-Construir un asistente VTuber local con el menor retardo percibido posible:
-
-- Entrada: micrófono → VAD → STT (streaming)
-- Contexto: RAG memory + búsqueda web (MCP/DuckDuckGo) + visión de pantalla
-- Generación: LLM (streaming, con contexto inyectado)
-- Salida: TTS (XTTS o Edge TTS, chunking) → reproducción de audio
-- Animación: lipsync + expresiones → OSC a VTube Studio **o** WebSocket a frontend propio
-- Control: WebUI para monitoreo y configuración en tiempo real
-
-**Metas de latencia (referencia):**
-- Primer token del LLM: < 300 ms (depende del modelo y GPU)
-- Primera salida de voz: < 900 ms (XTTS suele ser el factor dominante)
-- Lipsync: actualización 50–100 Hz sin bloqueos del hilo principal
-- RAG retrieval: < 50 ms (búsqueda vectorial local)
-
----
-
-## Principios no negociables (latencia)
-
-1. **Nada pesado en el loop principal**: STT/LLM/TTS deben ejecutarse en hilos o procesos dedicados.
-2. **Streaming end-to-end**: no esperar texto completo para hablar.
-3. **Mensajes mínimos** hacia el avatar:
-   - `mouth_open` (0..1), `blink` (0/1), `gaze` (x,y), `emotion` (enum)
-4. **Evitar GC/allocations** en rutas calientes:
-   - no construir strings grandes por frame
-   - no logs en exceso en tiempo real
-5. **Configuración en YAML** (una sola fuente de verdad) para:
-   - modelos
-   - prompt de personalidad
-   - parámetros de performance
-   - mapeo OSC
-
----
-
-## Estructura recomendada del repositorio
+Pipeline de voz-a-avatar local con el menor retardo percibido posible:
 
 ```
-mia/
-  AGENTS.md
-  config.yaml
-  pyproject.toml
+Mic → VAD → STT → RAG → LLM (stream) → TTS (chunked) → Audio + Lipsync → Avatar
+```
+
+**Interfaces de entrada:**
+- Micrófono local (VAD → STT)
+- WebUI (chat escrito)
+- Discord voice channel *(próximamente)*
+
+**Interfaces de salida:**
+- Audio local (speakers) + WebUI (Web Audio API)
+- VTube Studio (OSC: lipsync + blink)
+- Discord voice channel *(próximamente)*
+
+---
+
+## Principios no negociables
+
+1. **Nada pesado en el loop principal**: STT/LLM/TTS en hilos o `run_in_executor`
+2. **Streaming end-to-end**: no esperar texto completo para hablar
+3. **Configuración en YAML**: una sola fuente de verdad (`config.yaml`)
+4. **Módulos pequeños y desacoplados**: una responsabilidad por archivo
+5. **Tests obligatorios** para cambios en módulos core *(33 tests actualmente)*
+
+**Metas de latencia:**
+
+| Etapa | Objetivo |
+|-------|----------|
+| Primer token LLM | < 300 ms |
+| Primera salida de voz | < 900 ms |
+| Lipsync | 50–100 Hz |
+| RAG retrieval | < 50 ms |
+
+---
+
+## Estructura del repositorio
+
+```
+MIA-AI/
+  config.yaml                    Configuración central
+  config.example.yaml            Ejemplo de referencia
+  pyproject.toml                 Dependencias y build
+  .env                           Secrets (Discord token, etc.) — gitignored
+
   src/mia/
-    main.py
-    config.py
-    pipeline.py
-    audio_io.py
-    vad.py
-    stt_whispercpp.py
-    llm_llamacpp.py
-    llm_lmstudio.py
-    llm_openrouter.py
-    tts_xtts.py
-    tts_edge.py
-    lipsync.py
-    rag_memory.py
-    vision.py             # captura de pantalla + LLM visión (OpenRouter)
-    conversations/        # sistema de turnos de conversación
-      __init__.py
-      types.py            # type aliases y dataclasses compartidas
-      message_handler.py  # sincronización frontend↔backend (asyncio.Event)
-      tts_manager.py      # TTS paralelo con reordenamiento por seq number
-      conversation_handler.py   # entry point: despacha triggers a tasks
-      single_conversation.py    # flujo completo de conversación 1:1
-      conversation_utils.py     # helpers compartidos
-    tools/
-      web_search.py       # búsqueda en internet (MCP + DuckDuckGo)
-    vtube_osc.py
-    ws_server.py          # WebSocket + servidor HTTP para WebUI
-  prompts/                # prompt modular (archivos .md concatenados)
-    personality.md
-    expressions.md
-    search.md
-    vision.md
-  web/                    # WebUI (vanilla HTML/CSS/JS)
-    index.html
-    style.css
-    app.js
-  data/
-    chroma_db/            # vector store persistente (auto-generado)
-  tests/
-    test_config.py
-    test_prompt.py
-    test_rag.py
-    test_message_handler.py
-    test_tts_manager.py
-```
+    main.py                      Punto de entrada
+    config.py                    YAML → dataclasses tipados (11 secciones)
+    pipeline.py                  Orquestador asíncrono principal
 
-> Un agente debe mantener los módulos pequeños y con responsabilidad única.
+    # ── Audio ──
+    audio_io.py                  AudioCapture (mic) + AudioPlayer (cola)
+    vad.py                       EnergyVAD: RMS + pre-roll buffer
+
+    # ── Modelos ──
+    stt_whispercpp.py            STT (faster-whisper)
+    llm_llamacpp.py              LLM local (llama-cpp-python)
+    llm_lmstudio.py              LLM vía LM Studio (API OpenAI)
+    llm_openrouter.py            LLM vía OpenRouter (nube)
+    tts_edge.py                  TTS online (Microsoft Edge) + chunk_text
+
+    # ── Memoria ──
+    rag_memory.py                ChromaDB + sentence-transformers
+
+    # ── Avatar ──
+    lipsync.py                   RMS → mouth_open (0..1)
+    vtube_osc.py                 OSC hacia VTube Studio
+
+    # ── Comunicación ──
+    ws_server.py                 WebSocket + HTTP server para WebUI
+
+    # ── Conversaciones ──
+    conversations/
+      __init__.py                Exports del paquete
+      types.py                   Type aliases, dataclasses, WebSocketSend
+      message_handler.py         Sincronización frontend↔backend (asyncio.Event)
+      tts_manager.py             TTS paralelo + entrega ordenada por seq number
+      conversation_handler.py    Entry point: triggers → asyncio.Task
+      single_conversation.py     Flujo de 14 pasos de un turno
+      conversation_utils.py      Helpers (señales, cleanup, finalización)
+
+  prompts/                       Prompt modular (archivos .md concatenados)
+  web/                           WebUI (HTML/CSS/JS vanilla)
+  data/chroma_db/                Vector store persistente (auto-generado)
+  tests/                         Tests unitarios (33 tests)
+```
 
 ---
 
-## Configuración (YAML)
+## Configuración
 
-- **No hardcodear** rutas de modelos ni prompts: todo va en `config.yaml`.
-- La personalidad y las instrucciones del LLM se definen en la carpeta `prompts/` (ver sección **Prompt modular**).
-- No agregar “lore” largo: mantener el prompt compacto para reducir tokens y latencia.
+- Toda la configuración va en `config.yaml` (tipada en `config.py`).
+- **Nunca hardcodear** rutas, modelos ni parámetros.
+- Si necesitas un parámetro nuevo:
+  1. Agregar a `config.yaml` y `config.example.yaml`
+  2. Agregar dataclass en `config.py` (o campo nuevo en dataclass existente)
+  3. Documentar en AGENTS.md
+  4. Añadir test si aplica
 
-Si un agente necesita un parámetro nuevo:
-1. Agregarlo a `config.yaml`
-2. Leerlo en `config.py`
-3. Documentarlo aquí en AGENTS.md
-4. Añadir test si aplica
+### Secciones de config.yaml
+
+| Sección | Dataclass | Descripción |
+|---------|-----------|-------------|
+| `prompt` | `PromptConfig` | System prompt fallback + carpeta modular |
+| `models.llm` | `LLMConfig` | Backend, modelo, parámetros de generación |
+| `models.stt` | `STTConfig` | Modelo, idioma, device |
+| `models.tts` | `TTSConfig` | Backend, voz, chunk size, Edge params |
+| `audio` | `AudioConfig` | Sample rates, chunk_ms |
+| `vad` | `VADConfig` | Energy threshold, silence/speech durations |
+| `rag` | `RAGConfig` | Embedding model, persist dir, top_k |
+| `lipsync` | `LipsyncConfig` | Smoothing, RMS range |
+| `osc` | `OSCConfig` | IP, port, mapeo de parámetros |
+| `websocket` | `WebSocketConfig` | Host, port, enabled, WebUI dir |
+| `performance` | `PerformanceConfig` | VAD sensitivity, lipsync smoothing |
 
 ---
 
 ## Setup y ejecución
 
-### 1) Crear entorno e instalar dependencias base
 ```bash
+# 1. Entorno + dependencias base
 uv venv
 uv pip install -e ".[dev]"
-```
 
-### 2) Instalar CUDA PyTorch (obligatorio para GPU)
-```bash
+# 2. CUDA PyTorch (obligatorio para GPU)
 uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-```
-PyPI solo distribuye torch CPU. Sin este paso, STT/TTS/RAG corren en CPU.
 
-### 3) Instalar dependencias ML
-```bash
+# 3. Dependencias ML
 uv pip install faster-whisper
 uv pip install TTS
-# Re-instalar CUDA torch (TTS sobreescribe con CPU torch):
+# Re-instalar CUDA torch (TTS sobreescribe con CPU):
 uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-```
 
-### 4) Ejecutar
-```bash
+# 4. Ejecutar
 .venv/Scripts/python -m mia.main
 ```
-**No usar `uv run mia`** — `uv run` re-resuelve dependencias y puede sobreescribir CUDA torch con la versión CPU de PyPI.
 
-### Variables y rutas
-- Modelos y voces se esperan bajo `./models` y `./voices` según `config.yaml`.
-- El agente no debe asumir rutas absolutas.
+> **Nunca usar `uv run mia`** — re-resuelve dependencias y puede sobreescribir CUDA torch.
 
 ---
 
-## Reglas de implementación por componente
+## Arquitectura del pipeline
 
-### Audio / VAD
-- Audio en chunks pequeños (10–20 ms).
-- VAD debe ser configurable y rápido.
-- No bloquear el hilo de captura.
+### Flujo principal (`pipeline.py`)
 
-### STT
-- Priorizar modelos `tiny`/`base` para baja latencia.
-- Forzar idioma (`es`) para evitar auto-detección.
-
-### LLM
-- Preferir 7B–8B cuantizado.
-- Streaming habilitado.
-- Contexto moderado (ej. 2048) para evitar degradación de rendimiento.
-- El prompt del LLM recibe fragmentos RAG **antes** del mensaje del usuario.
-
-### RAG Memory
-- **Motor**: ChromaDB (local, persistente en `./data/chroma_db/`).
-- **Embeddings**: `sentence-transformers` con modelo ligero (`all-MiniLM-L6-v2` ~80 MB).
-- **Ingesta**: al finalizar cada turno se almacenan pares `(user_msg, assistant_msg)` como documentos.
-- **Retrieval**: buscar top-K fragmentos (configurable, default `k=3`) por similitud coseno.
-- **Inyección en prompt**: insertar fragmentos relevantes como sección `## Contexto previo` antes del último mensaje del usuario.
-- **Latencia**: la búsqueda vectorial debe completarse en < 50 ms; ejecutar en hilo separado si es necesario.
-- **Limpieza**: respetar `rag.max_docs`; si se excede, eliminar los más antiguos.
-- **Desactivación**: si `rag.enabled` es `false`, no cargar ChromaDB ni embeddings.
-
-### TTS
-
-Se soportan dos backends seleccionables vía `models.tts.backend` en `config.yaml`:
-
-#### XTTS (`backend: "xtts"`)
--   Requiere GPU y modelo local (Coqui TTS).
--   Debe soportar **chunking** de texto:
-    -   sintetizar 120–160 caracteres por chunk (configurable)
-    -   reproducir mientras se genera el siguiente chunk
--   Evitar ajustes "quality-first" por defecto.
--   Manejar cola de salida (no desordenar chunks).
--   **torch.load compatibility**: torch 2.6+ usa `weights_only=True` por defecto, incompatible con XTTS. `tts_xtts.py` tiene un monkey-patch para forzar `weights_only=False` durante la carga.
-
-#### Edge TTS (`backend: "edge"`)
--   Usa el servicio online de Microsoft Edge. **No requiere GPU, modelo local ni API key.**
--   Parámetros configurables en YAML:
-    -   `edge_voice`: nombre de la voz (ej. `es-MX-DaliaNeural`). Listar disponibles: `edge-tts --list-voices`
-    -   `edge_rate`: velocidad (ej. `"+10%"`, `"-10%"`)
-    -   `edge_pitch`: tono (ej. `"+10Hz"`, `"-10Hz"`)
--   El audio se recibe como MP3 y se decodifica a PCM float32 (pydub → soundfile → ffmpeg fallback).
--   Latencia depende de la red; ideal para desarrollo o cuando no hay GPU disponible.
-
-### Lipsync
--   Modo recomendado: **RMS** (simple, estable y rápido).
--   Visemas solo si el costo extra no afecta la latencia percibida.
-
-### Integración avatar
-
-#### OSC (VTube Studio)
-- UDP, mensajes pequeños y frecuentes.
-- Smoothing configurable (alpha).
-- Respetar nombres exactos de parámetros del modelo (mapeo en YAML).
-
-#### WebSocket (frontend propio)
-- Protocolo mínimo:
-  - `{"type":"mouth","value":0.42}`
-  - `{"type":"emotion","value":"happy"}`
-- Evitar enviar texto completo al frontend salvo para subtítulos.
-
-### Prompt modular
-- En vez de un string en `prompt.system`, MIA carga una carpeta `prompts/` con archivos `.md`.
-- Cada archivo es un módulo del system prompt (personalidad, expresiones, herramientas, visión, etc.).
-- Se concatenan en orden alfabético (o configurable) al armar el system prompt.
-- Permite editar la personalidad sin tocar código ni reiniciar (hot-reload nice-to-have).
-- Nuevos archivos `.md` en la carpeta se incluyen automáticamente.
-- La carpeta se configura vía `prompt.dir` en `config.yaml` (default `./prompts/`).
-
-### Búsqueda web (MCP + DuckDuckGo)
-- El LLM puede solicitar búsquedas en internet emitiendo un tag/JSON especial en su respuesta.
-- Módulo `tools/web_search.py` ejecuta la búsqueda vía servidor MCP con DuckDuckGo.
-- Los resultados se inyectan como contexto y el LLM genera su respuesta final.
-- Configurable en YAML: `tools.web_search.enabled`, `max_results`.
-- Instrucciones para el LLM en `prompts/search.md`.
-- No bloquear el pipeline: ejecutar en hilo separado.
-
-### Vision LLM (captura de pantalla)
-- Módulo `vision.py` captura la pantalla cada N segundos (configurable).
-- Envía el screenshot a un LLM con visión vía **OpenRouter** (ej. `google/gemini-flash-1.5-8b`).
-- La descripción devuelta se inyecta en el prompt como `## Lo que ves en pantalla`.
-- Configurable: `vision.enabled`, `vision.interval_s`, `vision.model`, `vision.api_key`.
-- **Toggle on/off desde el WebUI** vía comando WebSocket.
-- Debe correr en hilo aparte para no bloquear el pipeline principal.
-- Instrucciones para el LLM en `prompts/vision.md`.
-
-### WebUI (panel de control)
-- **Stack**: vanilla HTML/CSS/JS (sin frameworks ni build step).
-- Servido como archivos estáticos desde `web/` por el mismo proceso Python.
-- Comunicación bidireccional por WebSocket (el existente en `ws_server.py`).
-- Funcionalidades:
-  - Mute/unmute micrófono, pausa del pipeline
-  - Subtítulos en tiempo real (usuario + MIA)
-  - Historial de conversación
-  - Caja de texto (modo chat escrito)
-  - Métricas de latencia en vivo (STT, RAG, LLM, TTS)
-  - Toggle de visión on/off
-  - Toggle de RAG on/off
-  - Selector de voz TTS / sliders de rate/pitch
-  - Logs filtrables y panel de debug
-
----
-
-## Estándares de código
-
-- Python 3.11+
-- Tipado gradual (anotaciones donde agreguen valor).
-- Logging:
-  - `INFO` para eventos de alto nivel
-  - `DEBUG` solo para diagnóstico (apagado por defecto)
-- No introducir dependencias pesadas sin justificación de latencia.
-
----
-
-## Pruebas mínimas (obligatorias para cambios relevantes)
-
-Agregar o actualizar tests en `tests/` cuando se modifique:
-- carga/validación del YAML
-- construcción del prompt
-- serialización de mensajes OSC/WS
-- chunking de texto para TTS
-- ingesta y retrieval de RAG (`test_rag.py`)
-
-Ejecutar:
-```bash
-.venv/Scripts/python -m pytest
+```python
+async def run(self):
+    while self._running:
+        await self._listen_and_respond()
 ```
 
----
-
-## Perfilado y métricas
-
-Todo agente que toque el pipeline debe:
-- Medir tiempos por etapa:
-  - `vad_ms`, `stt_ms`, `rag_retrieval_ms`, `llm_first_token_ms`, `tts_first_audio_ms`, `end_to_end_ms`
-- Reportar en logs (nivel INFO) cada N interacciones.
-- No imprimir por chunk (demasiado costo).
-
----
-
-## Seguridad y comportamiento
-
-- No inventar capacidades que no estén implementadas.
-- Si `rag.enabled` es `false`, no simular memoria ni hacer referencia a conversaciones pasadas.
-- Si `rag.enabled` es `true`, MIA puede referenciar contexto recuperado pero **nunca fabricar recuerdos** que no estén en los fragmentos.
-- Si falta contexto, preguntar **una sola cosa** para reducir turnos.
+`_listen_and_respond()`:
+1. Chequea si hay conversación activa (`is_busy`) → si sí, `sleep(0.1)` y retorna
+2. Captura audio del mic → `_capture_speech()` con VAD + pre-roll buffer
+3. Delega a `ConversationHandler.handle_trigger()` como `asyncio.Task`
+4. Si no hay WebSocket → fallback legacy (STT → LLM → TTS secuencial)
 
 ### Sistema de turnos de conversación
 
-El paquete `conversations/` implementa un sistema de control de turnos basado en `asyncio.Task`. La arquitectura está documentada en detalle en `conversation_turn_system_guide.md`.
-
-#### Arquitectura general
+El paquete `conversations/` implementa control de turnos basado en `asyncio.Task`:
 
 ```
-WebSocket Message → conversation_handler → asyncio.Task
+WebSocket/Discord → conversation_handler → asyncio.Task
                                              ↓
-                                    single_conversation
+                                    single_conversation (14 pasos)
                                              ↓
-                                    LLM stream → TTSTaskManager (parallel)
+                                    LLM stream → TTSTaskManager (paralelo)
                                              ↓
-                                    Ordered audio → WebSocket → Frontend
+                                    Audio ordenado → WebSocket/Discord
                                              ↓
                                     wait "frontend-playback-complete"
                                              ↓
-                                    Turn complete
+                                    Turno completo
 ```
 
-#### Componentes clave
+#### Componentes
 
 | Módulo | Responsabilidad |
-|---|---|
-| `message_handler.py` | Sincronización request-response sobre WebSocket con `asyncio.Event` |
-| `tts_manager.py` | TTS paralelo con sequence numbers + buffer de reordenamiento |
-| `conversation_handler.py` | Entry point: recibe triggers, despacha tasks, maneja concurrency guard |
-| `single_conversation.py` | Flujo completo de un turno de conversación (14 pasos) |
-| `conversation_utils.py` | Helpers compartidos (señales, cleanup, finalización) |
+|--------|----------------|
+| `types.py` | `ConversationMetadata`, `GroupConversationState`, `WebSocketSend` |
+| `message_handler.py` | Sincronización request↔response con `asyncio.Event` |
+| `tts_manager.py` | TTS paralelo: sequence numbers + buffer de reordenamiento |
+| `conversation_handler.py` | Recibe triggers, concurrency guard (1 turno/cliente), despacha tasks |
+| `single_conversation.py` | Flujo completo: STT → RAG → LLM → TTS → sync → historial |
+| `conversation_utils.py` | Señales de inicio/fin, cleanup, finalización de turno |
 
 #### Reglas de implementación
 
-- **Un turno por cliente a la vez**: verificar `task.done()` antes de crear una nueva task.
-- **TTS paralelo, entrega ordenada**: cada chunk de TTS recibe un sequence number; el sender loop bufferea y envía en orden.
-- **Sincronización con frontend**: después de enviar todo el audio, el backend envía `backend-synth-complete` y **bloquea** hasta recibir `frontend-playback-complete`.
-- **Cleanup siempre**: usar `try/except CancelledError/finally` en todo flujo de conversación.
-- **Interrupciones**: al cancelar una task, guardar respuesta parcial en historial y marcar `[Interrupted by user]`.
+- **Un turno por cliente a la vez**: `is_busy()` antes de crear nueva task
+- **TTS paralelo, entrega ordenada**: cada chunk recibe sequence number; sender loop envía en orden
+- **Sincronización**: `backend-synth-complete` → bloquea hasta `frontend-playback-complete`
+- **Cleanup siempre**: `try/except CancelledError/finally` en todo flujo
+- **Interrupciones**: cancelar task → guardar respuesta parcial → `[Interrupted by user]`
 
-#### Protocolo WebSocket (mensajes de conversación)
+#### Protocolo WebSocket
 
 **Backend → Frontend:**
-- `conversation-chain-start` — AI procesando
-- `backend-synth-complete` — no hay más audio
-- `force-new-message` — frontend inicia nueva burbuja
-- `conversation-chain-end` — turno completo
-- `audio-response` — chunk de audio + texto display
-- `interrupt-signal` — conversación interrumpida
+
+| Tipo | Propósito |
+|------|-----------|
+| `control: conversation-chain-start` | AI procesando |
+| `audio-response` | Chunk de audio WAV base64 + display text |
+| `backend-synth-complete` | No hay más audio |
+| `force-new-message` | Nueva burbuja de chat |
+| `control: conversation-chain-end` | Turno completo |
+| `interrupt-signal` | Conversación interrumpida |
+| `user-input-transcription` | Texto transcrito del usuario |
 
 **Frontend → Backend:**
-- `text-input` — usuario envió texto
-- `mic-audio-end` — usuario terminó de hablar
-- `frontend-playback-complete` — audio reproducido
-- `interrupt` — usuario quiere interrumpir
+
+| Tipo | Propósito |
+|------|-----------|
+| `text-input` | Chat escrito |
+| `mic-audio-end` | Usuario terminó de hablar |
+| `frontend-playback-complete` | Audio reproducido |
+| `interrupt` | Usuario quiere interrumpir |
 
 ---
 
-## Tareas típicas para agentes
+## Reglas por componente
 
-1. Mejorar streaming:
-   - disminuir tamaño de chunks
-   - paralelizar TTS/LLM
-2. Reducir jitter de lipsync:
-   - ajustar smoothing
-   - evitar picos por GC
-3. Mejorar estabilidad del prompt:
-   - reducir tokens
-   - reforzar estilo sin añadir texto largo
-4. Optimizar RAG:
-   - ajustar `k` y `max_docs` según latencia
-   - experimentar con modelos de embedding más ligeros
-   - implementar filtrado por relevancia mínima (score threshold)
+### Audio / VAD
+- Chunks pequeños (20 ms)
+- Pre-roll buffer de 5 chunks (~100 ms) para no perder inicio de palabras
+- VAD configurable: `energy_threshold`, `silence_duration_ms`, `min_speech_duration_ms`
+
+### STT
+- Forzar idioma (`es`) para evitar auto-detección
+- `run_in_executor` para no bloquear el event loop
+
+### LLM
+- Streaming obligatorio
+- Contexto moderado (2048) para rendimiento
+- RAG context se inyecta antes del mensaje del usuario
+
+### RAG Memory
+- ChromaDB local, persistente en `./data/chroma_db/`
+- Embeddings: `all-MiniLM-L6-v2` (~80 MB)
+- Ingesta al finalizar cada turno: pares `(user_msg, assistant_msg)`
+- Retrieval: top-K por similitud coseno
+- Si `rag.enabled: false`, no cargar ChromaDB ni embeddings
+
+### TTS
+- **Edge TTS**: único backend soportado. Online (Microsoft), sin GPU
+- Parámetros: `edge_voice`, `edge_rate`, `edge_pitch`
+- `chunk_text()` divide texto largo en chunks de 120–160 chars antes de sintetizar
+- Expone `.synthesize(text) → np.ndarray`
+- Para explorar voces: `edge-tts --list-voices`
+
+### Lipsync
+- RMS con suavizado exponencial
+- Actualización 50–100 Hz sin bloquear el hilo principal
+
+### Prompt modular
+- Carpeta `prompts/` con archivos `.md` concatenados alfabéticamente
+- Editar personalidad sin tocar código
+- `prompt.system` como fallback si la carpeta no existe o está vacía
+
+### WebUI
+- Vanilla HTML/CSS/JS, sin build step
+- Servido desde `web/` por `ws_server.py` (aiohttp)
+- Comunicación bidireccional por WebSocket
+
+---
+
+## Tests
+
+```bash
+.venv/Scripts/python -m pytest -v
+```
+
+33 tests:
+- `test_config.py` — carga y validación YAML
+- `test_prompt.py` — prompt modular + fallback
+- `test_rag.py` — ingesta, retrieval, score threshold
+- `test_message_handler.py` — sincronización (7 tests)
+- `test_tts_manager.py` — TTS paralelo + ordenamiento (5 tests)
+
+Agregar tests al modificar módulos core.
 
 ---
 
 ## Gestión de dependencias
 
-Versiones que causan problemas conocidos:
+### Tabla de restricciones
 
-| Paquete        | Restricción      | Motivo                                              |
-|----------------|------------------|-----------------------------------------------------|
-| torch          | CUDA build       | PyPI solo tiene CPU. Instalar desde pytorch index   |
-| torchaudio     | Misma versión/CUDA que torch | DLL mismatch si no coinciden           |
-| transformers   | <4.44            | TTS 0.22 usa `BeamSearchScorer` (eliminado en 4.44) |
-| TTS            | 0.22.0           | Sobreescribe torch con CPU al instalarse            |
+| Paquete | Restricción | Motivo |
+|---------|-------------|--------|
+| numpy | Verificar tras instalar | Binary incompatibility con extensiones C |
+| py-cord | >=2.6.0 | No coexiste con discord.py |
+| faster-whisper | Manual install | CTranslate2, no depende de PyTorch |
 
-**Regla**: después de instalar cualquier paquete que dependa de torch (TTS, sentence-transformers, etc.), verificar que torch sigue siendo CUDA:
-```bash
-.venv/Scripts/python -c "import torch; print(torch.cuda.is_available())"  # debe ser True
+### ⚠️ Problema frecuente: numpy binary incompatibility
+
+Al instalar paquetes nuevos, `uv` puede actualizar numpy a una versión más nueva que las extensiones C compiladas (chromadb/hnswlib, onnxruntime, etc.). Esto causa:
+
 ```
+ValueError: numpy.dtype size changed, may indicate binary incompatibility.
+Expected 96 from C header, got 88 from PyObject
+```
+
+**Solución**: reinstalar los paquetes que dependen de numpy contra la nueva versión:
+
+```bash
+uv pip install --force-reinstall chromadb chroma-hnswlib
+```
+
+### Orden de instalación seguro
+
+1. **Crear venv**: `python -m venv .venv`
+2. **Instalar el proyecto**: `uv pip install -e .`
+3. **Instalar faster-whisper**: `uv pip install faster-whisper`
+4. **(Opcional) llama-cpp-python**: `uv pip install llama-cpp-python`
+5. **Verificar**: `.venv/Scripts/python -m mia.main`
+
+### Uso de uv vs pip
+
+- Usar `uv pip install` para instalar paquetes (más rápido, resuelve mejor)
+- Usar `uv pip install --force-reinstall` cuando hay conflictos de binary compatibility
+- **No usar** `uv run` para ejecutar MIA — puede reinstalar paquetes y romper numpy
+- Siempre ejecutar con: `.venv/Scripts/python -m mia.main`
+- Para tests: `.venv/Scripts/python -m pytest tests/ -v`
+
+### Discord dependencies
+
+```bash
+uv pip install "py-cord[voice]>=2.6.0" "python-dotenv>=1.0.0"
+```
+
+- `py-cord` reemplaza `discord.py` — ambos no pueden coexistir
+- Requiere `ffmpeg` instalado en el sistema para audio de Discord
+- Token del bot en `.env` (archivo gitignored)
+
 
 ---
 
-## Definition of Done (DoD)
+## Perfilado
 
-Un cambio se considera listo si:
-- No sube latencia percibida en pruebas locales
+Todo cambio al pipeline debe medir tiempos por etapa:
+- `stt_ms`, `rag_retrieval_ms`, `llm_first_token_ms`, `tts_first_audio_ms`, `end_to_end_ms`
+- Reportar en logs nivel INFO
+- No loguear por chunk (demasiado overhead)
+
+---
+
+## Definition of Done
+
+Un cambio está listo si:
+- No aumenta latencia percibida
 - Configurable vía YAML
-- Sin regressions en tests
-- Código claro, modular y sin dependencias innecesarias
-- No rompe CUDA torch (verificar después de cambios en dependencias)
+- Sin regresiones en tests
+- Código claro, modular, sin dependencias innecesarias
+- No rompe CUDA torch

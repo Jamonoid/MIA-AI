@@ -14,9 +14,10 @@ dependencies = [
     "openai",
     "chromadb",
     "sentence-transformers",
-    "transformers<4.44",       # Coqui TTS 0.22 requires BeamSearchScorer (removed in 4.44+)
     "edge-tts",                # Microsoft Edge TTS (no requiere GPU)
     "aiohttp",                 # HTTP server para WebUI
+    "py-cord[voice]>=2.6.0",   # Discord bot con soporte de voz
+    "python-dotenv>=1.0.0",    # Carga de .env (token Discord, etc.)
 ]
 
 [project.optional-dependencies]
@@ -26,18 +27,12 @@ dev = [
 
 # ══════════════════════════════════════════════════════════════
 # ML dependencies -- DO NOT add to [dependencies] or extras.
-# These require manual installation in order due to:
-#   - CUDA-specific torch builds (PyPI only ships CPU)
-#   - C++ compilation (llama-cpp-python)
-#   - Version pinning (TTS <-> transformers <-> torch)
+# These require manual installation:
+#   1. uv pip install faster-whisper
+#   2. (optional) uv pip install llama-cpp-python
 #
-# Install order:
-#   1. uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-#   2. uv pip install faster-whisper
-#   3. uv pip install TTS
-#   4. (optional) uv pip install llama-cpp-python
-#
-# After installing TTS, re-run step 1 -- TTS pulls in CPU torch.
+# faster-whisper usa CTranslate2 (no depende de PyTorch).
+# No es necesario instalar torch/torchaudio manualmente.
 # ══════════════════════════════════════════════════════════════
 
 [project.scripts]
@@ -53,12 +48,3 @@ packages = ["src/mia"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-# Pin torch to CUDA index so `uv pip install` doesn't pull CPU-only from PyPI
-[tool.uv.sources]
-torch = { index = "pytorch-cu124" }
-torchaudio = { index = "pytorch-cu124" }
-
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
-explicit = true

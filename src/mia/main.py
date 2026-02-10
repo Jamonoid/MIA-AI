@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
 import sys
 from pathlib import Path
 
@@ -27,6 +26,13 @@ def setup_logging(level: str = "INFO") -> None:
 
 def main() -> None:
     """Punto de entrada principal."""
+    # Cargar variables de entorno (.env)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass  # python-dotenv no instalado, variables se leen del entorno
+
     setup_logging("INFO")
     logger = logging.getLogger("mia")
 
@@ -61,26 +67,22 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Manejar Ctrl+C
-    loop = asyncio.new_event_loop()
-
-    def _signal_handler() -> None:
-        logger.info("Señal de interrupción recibida...")
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
-
-    if sys.platform != "win32":
-        loop.add_signal_handler(signal.SIGINT, _signal_handler)
-        loop.add_signal_handler(signal.SIGTERM, _signal_handler)
-
     # Ejecutar
+    async def _run() -> None:
+        try:
+            await pipeline.run()
+        except KeyboardInterrupt:
+            pass
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await pipeline.shutdown()
+
     try:
-        loop.run_until_complete(pipeline.run())
+        asyncio.run(_run())
     except KeyboardInterrupt:
         logger.info("Interrumpido por usuario")
-        loop.run_until_complete(pipeline.shutdown())
     finally:
-        loop.close()
         logger.info("Hasta luego 👋")
 
 

@@ -23,6 +23,45 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def chunk_text(text: str, max_chars: int = 150) -> list[str]:
+    """
+    Divide texto en chunks respetando límites de oración/cláusula.
+
+    Prioriza cortar en:  . ! ? ; , (en ese orden)
+    Si no hay puntuación, corta en espacio más cercano al límite.
+    """
+    if len(text) <= max_chars:
+        return [text.strip()] if text.strip() else []
+
+    chunks: list[str] = []
+    remaining = text.strip()
+
+    while remaining:
+        if len(remaining) <= max_chars:
+            chunks.append(remaining)
+            break
+
+        # Buscar el mejor punto de corte dentro del rango
+        segment = remaining[:max_chars]
+        cut_index = -1
+
+        # Priorizar puntuación fuerte
+        for sep in [". ", "! ", "? ", "; ", ", ", " "]:
+            idx = segment.rfind(sep)
+            if idx > max_chars // 3:  # No cortar demasiado pronto
+                cut_index = idx + len(sep)
+                break
+
+        if cut_index <= 0:
+            cut_index = max_chars  # Forzar corte
+
+        chunk = remaining[:cut_index].strip()
+        if chunk:
+            chunks.append(chunk)
+        remaining = remaining[cut_index:].strip()
+
+    return chunks
+
 def _decode_mp3_bytes(mp3_data: bytes) -> tuple[np.ndarray, int]:
     """
     Decodifica bytes MP3 a PCM float32 usando el decodificador disponible.
@@ -176,7 +215,7 @@ class EdgeTTS:
         El pipeline puede empezar a reproducir el primer chunk
         mientras los siguientes se generan.
         """
-        from .tts_xtts import chunk_text
+        # chunk_text está definida en este mismo módulo
 
         chunks = chunk_text(text, self.chunk_size)
         logger.info("TTS stream: %d chunks de texto", len(chunks))

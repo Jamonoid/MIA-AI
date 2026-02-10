@@ -86,3 +86,7 @@ pip-log.txt
 # ── Gemini / AI agents ──
 .gemini/
 .agent/
+
+# ── Guías privadas (contienen secrets) ──
+discord_bot_guide.md
+prompts/

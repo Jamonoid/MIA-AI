@@ -55,7 +55,7 @@ class OpenRouterLLM:
                 api_key=self.api_key,
                 default_headers={
                     "HTTP-Referer": "https://github.com/Jamonoid/MIA-AI",
-                    "X-Title": "MIA – Minimalist Interactive Avatar",
+                    "X-Title": "MIA - AI",
                 },
             )
 
@@ -158,7 +158,9 @@ class OpenRouterLLM:
 
         except Exception as exc:
             logger.error("OpenRouter error: %s", exc)
-            yield f"[Error de conexión con OpenRouter: {exc}]"
+            # ascii-safe error message
+            err_msg = str(exc).encode("ascii", "replace").decode("ascii")
+            yield f"[Error de conexion con OpenRouter: {err_msg}]"
             return
 
         elapsed_total = (time.perf_counter() - t0) * 1000

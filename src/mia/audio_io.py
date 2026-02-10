@@ -31,6 +31,7 @@ class AudioCapture:
         self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
         self._stream: sd.InputStream | None = None
         self._running = False
+        self.muted = False  # When True, drops all audio from mic
 
     def _callback(
         self,
@@ -41,6 +42,8 @@ class AudioCapture:
     ) -> None:
         if status:
             logger.debug("Audio capture status: %s", status)
+        if self.muted:
+            return  # Drop audio when muted
         try:
             self._queue.put_nowait(indata[:, 0].copy())
         except queue.Full:

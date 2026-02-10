@@ -55,7 +55,7 @@ class STTConfig:
 
 @dataclass
 class TTSConfig:
-    backend: str = "xtts"  # "xtts" | "edge"
+    backend: str = "edge"  # Solo "edge" soportado actualmente
     voice_path: str = "./voices/female_01.wav"
     chunk_size: int = 150
     language: str = "es"
@@ -124,6 +124,14 @@ class PerformanceConfig:
 
 
 @dataclass
+class DiscordConfig:
+    enabled: bool = False
+    text_channel_responses: bool = False  # Toggle via WebUI
+    group_silence_ms: int = 1500          # Wait for all users to be silent
+    dual_audio: bool = True               # Play on local PC too
+
+
+@dataclass
 class MIAConfig:
     """Configuración raíz de MIA."""
 
@@ -138,6 +146,7 @@ class MIAConfig:
     osc: OSCConfig = field(default_factory=OSCConfig)
     websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    discord: DiscordConfig = field(default_factory=DiscordConfig)
 
 
 # ──────────────────────────────────────────────
@@ -182,6 +191,7 @@ def load_config(path: Path | str | None = None) -> MIAConfig:
         osc=_dict_to_dataclass(OSCConfig, raw.get("osc", {})),
         websocket=_dict_to_dataclass(WebSocketConfig, raw.get("websocket", {})),
         performance=_dict_to_dataclass(PerformanceConfig, raw.get("performance", {})),
+        discord=_dict_to_dataclass(DiscordConfig, raw.get("discord", {})),
     )
 
     return cfg
