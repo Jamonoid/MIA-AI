@@ -57,6 +57,7 @@ mia/
     llm_lmstudio.py
     llm_openrouter.py
     tts_xtts.py
+    tts_edge.py
     lipsync.py
     rag_memory.py
     vtube_osc.py
@@ -142,23 +143,40 @@ uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu1
 - **Motor**: ChromaDB (local, persistente en `./data/chroma_db/`).
 - **Embeddings**: `sentence-transformers` con modelo ligero (`all-MiniLM-L6-v2` ~80 MB).
 - **Ingesta**: al finalizar cada turno se almacenan pares `(user_msg, assistant_msg)` como documentos.
-- **Retrieval**: buscar top-K fragmentos (configurable, default `k=3`) por similitud coseno.
-- **Inyección en prompt**: insertar fragmentos relevantes como sección `## Contexto previo` antes del último mensaje del usuario.
-- **Latencia**: la búsqueda vectorial debe completarse en < 50 ms; ejecutar en hilo separado si es necesario.
-- **Limpieza**: respetar `rag.max_docs`; si se excede, eliminar los más antiguos.
-- **Desactivación**: si `rag.enabled` es `false`, no cargar ChromaDB ni embeddings.
+-   **Motor**: ChromaDB (local, persistente en `./data/chroma_db/`).
+-   **Embeddings**: `sentence-transformers` con modelo ligero (`all-MiniLM-L6-v2` ~80 MB).
+-   **Ingesta**: al finalizar cada turno se almacenan pares `(user_msg, assistant_msg)` como documentos.
+-   **Retrieval**: buscar top-K fragmentos (configurable, default `k=3`) por similitud coseno.
+-   **Inyección en prompt**: insertar fragmentos relevantes como sección `## Contexto previo` antes del último mensaje del usuario.
+-   **Latencia**: la búsqueda vectorial debe completarse en < 50 ms; ejecutar en hilo separado si es necesario.
+-   **Limpieza**: respetar `rag.max_docs`; si se excede, eliminar los más antiguos.
+-   **Desactivación**: si `rag.enabled` es `false`, no cargar ChromaDB ni embeddings.
 
-### TTS (XTTS)
-- Debe soportar **chunking** de texto:
-  - sintetizar 120–160 caracteres por chunk (configurable)
-  - reproducir mientras se genera el siguiente chunk
-- Evitar ajustes “quality-first” por defecto.
-- Manejar cola de salida (no desordenar chunks).
-- **torch.load compatibility**: torch 2.6+ usa `weights_only=True` por defecto, incompatible con XTTS. `tts_xtts.py` tiene un monkey-patch para forzar `weights_only=False` durante la carga.
+### TTS
+
+Se soportan dos backends seleccionables vía `models.tts.backend` en `config.yaml`:
+
+#### XTTS (`backend: "xtts"`)
+-   Requiere GPU y modelo local (Coqui TTS).
+-   Debe soportar **chunking** de texto:
+    -   sintetizar 120–160 caracteres por chunk (configurable)
+    -   reproducir mientras se genera el siguiente chunk
+-   Evitar ajustes "quality-first" por defecto.
+-   Manejar cola de salida (no desordenar chunks).
+-   **torch.load compatibility**: torch 2.6+ usa `weights_only=True` por defecto, incompatible con XTTS. `tts_xtts.py` tiene un monkey-patch para forzar `weights_only=False` durante la carga.
+
+#### Edge TTS (`backend: "edge"`)
+-   Usa el servicio online de Microsoft Edge. **No requiere GPU, modelo local ni API key.**
+-   Parámetros configurables en YAML:
+    -   `edge_voice`: nombre de la voz (ej. `es-MX-DaliaNeural`). Listar disponibles: `edge-tts --list-voices`
+    -   `edge_rate`: velocidad (ej. `"+10%"`, `"-10%"`)
+    -   `edge_pitch`: tono (ej. `"+10Hz"`, `"-10Hz"`)
+-   El audio se recibe como MP3 y se decodifica a PCM float32 (pydub → soundfile → ffmpeg fallback).
+-   Latencia depende de la red; ideal para desarrollo o cuando no hay GPU disponible.
 
 ### Lipsync
-- Modo recomendado: **RMS** (simple, estable y rápido).
-- Visemas solo si el costo extra no afecta la latencia percibida.
+-   Modo recomendado: **RMS** (simple, estable y rápido).
+-   Visemas solo si el costo extra no afecta la latencia percibida.
 
 ### Integración avatar
 

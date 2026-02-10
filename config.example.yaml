@@ -25,10 +25,15 @@ models:
     device: "auto"                 # "auto" | "cuda" | "cpu"
     compute_type: "int8"
   tts:
-    voice_path: "./voices/female_01.wav"  # WAV de referencia (~10s) para clonación
+    backend: "edge"                # "xtts" | "edge"
+    voice_path: "./voices/female_01.wav"  # WAV de referencia (~10s) para clonación (solo XTTS)
     chunk_size: 150
     language: "es"
-    device: "auto"                 # "auto" | "cuda" | "cpu"
+    device: "auto"                 # "auto" | "cuda" | "cpu" (solo XTTS)
+    # Edge TTS (solo si backend: "edge") — no requiere GPU ni modelo local
+    edge_voice: "es-MX-DaliaNeural"     # edge-tts --list-voices para ver todas
+    edge_rate: "+0%"               # Velocidad: "+20%", "-10%", etc.
+    edge_pitch: "+0Hz"             # Tono: "+5Hz", "-10Hz", etc.
 
 audio:
   sample_rate: 16000

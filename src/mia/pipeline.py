@@ -127,11 +127,22 @@ class MIAPipeline:
             self._llm.load()
             logger.info("LLM backend: llama-cpp-python")
 
-        # TTS (pesado – cargar modelo)
-        from .tts_xtts import XTTS
+        # TTS – seleccionar backend
+        tts_backend = self.config.tts.backend.lower()
+        if tts_backend == "edge":
+            from .tts_edge import EdgeTTS
 
-        self._tts = XTTS(self.config.tts)
-        self._tts.load()
+            self._tts = EdgeTTS(self.config.tts)
+            self._tts.load()
+            logger.info(
+                "TTS backend: Edge TTS (voice=%s)", self.config.tts.edge_voice
+            )
+        else:
+            from .tts_xtts import XTTS
+
+            self._tts = XTTS(self.config.tts)
+            self._tts.load()
+            logger.info("TTS backend: XTTS v2")
 
         elapsed = (time.perf_counter() - t0) * 1000
         logger.info("═══ Módulos cargados en %.1f ms ═══", elapsed)

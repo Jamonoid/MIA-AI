@@ -54,10 +54,15 @@ class STTConfig:
 
 @dataclass
 class TTSConfig:
+    backend: str = "xtts"  # "xtts" | "edge"
     voice_path: str = "./voices/female_01.wav"
     chunk_size: int = 150
     language: str = "es"
     device: str = "auto"
+    # Edge TTS settings (solo si backend: "edge")
+    edge_voice: str = "es-MX-DaliaNeural"
+    edge_rate: str = "+0%"
+    edge_pitch: str = "+0Hz"
 
 
 @dataclass

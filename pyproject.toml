@@ -15,6 +15,7 @@ dependencies = [
     "chromadb",
     "sentence-transformers",
     "transformers<4.44",       # Coqui TTS 0.22 requires BeamSearchScorer (removed in 4.44+)
+    "edge-tts",                # Microsoft Edge TTS (no requiere GPU)
 ]
 
 [project.optional-dependencies]
