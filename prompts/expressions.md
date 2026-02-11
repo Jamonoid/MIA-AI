@@ -1,2 +1,0 @@
-# Expresiones faciales
-

@@ -91,3 +91,5 @@ pip-log.txt
 # ── Guías privadas (contienen secrets) ──
 discord_bot_guide.md
 prompts/**
+prompts/expressions.md
+prompts/personality.md
