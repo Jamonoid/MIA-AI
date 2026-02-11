@@ -99,12 +99,23 @@ class LipsyncConfig:
 
 
 @dataclass
-class OSCConfig:
-    ip: str = "127.0.0.1"
-    port: int = 9000
-    mapping: dict[str, str] = field(default_factory=lambda: {
-        "mouth_open": "MouthOpen",
-        "blink": "EyeBlink",
+class VTubeStudioConfig:
+    enabled: bool = True
+    ws_url: str = "ws://localhost:8001"
+    token_file: str = ".vts_token"
+    mouth_param: str = "MouthOpen"
+    eye_l_param: str = "EyeOpenLeft"
+    eye_r_param: str = "EyeOpenRight"
+    expressions: dict[str, str] = field(default_factory=lambda: {
+        "neutral": "00_IdleFace.exp3.json",
+        "happy": "01_HappyFace.exp3.json",
+        "cry": "02_CryFace.exp3.json",
+        "pout": "03_PoutFace.exp3.json",
+        "angry": "04_AngryFace.exp3.json",
+        "ashamed": "05_AshamedFace.exp3.json",
+        "scared": "06_ScaredFace.exp3.json",
+        "sad": "07_SadFace.exp3.json",
+        "super_happy": "08_SuperHappyFace.exp3.json",
     })
 
 
@@ -143,7 +154,7 @@ class MIAConfig:
     vad: VADConfig = field(default_factory=VADConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     lipsync: LipsyncConfig = field(default_factory=LipsyncConfig)
-    osc: OSCConfig = field(default_factory=OSCConfig)
+    vtube_studio: VTubeStudioConfig = field(default_factory=VTubeStudioConfig)
     websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
@@ -188,7 +199,7 @@ def load_config(path: Path | str | None = None) -> MIAConfig:
         vad=_dict_to_dataclass(VADConfig, raw.get("vad", {})),
         rag=_dict_to_dataclass(RAGConfig, raw.get("rag", {})),
         lipsync=_dict_to_dataclass(LipsyncConfig, raw.get("lipsync", {})),
-        osc=_dict_to_dataclass(OSCConfig, raw.get("osc", {})),
+        vtube_studio=_dict_to_dataclass(VTubeStudioConfig, raw.get("vtube_studio", {})),
         websocket=_dict_to_dataclass(WebSocketConfig, raw.get("websocket", {})),
         performance=_dict_to_dataclass(PerformanceConfig, raw.get("performance", {})),
         discord=_dict_to_dataclass(DiscordConfig, raw.get("discord", {})),

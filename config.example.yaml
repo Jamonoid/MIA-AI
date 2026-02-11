@@ -58,12 +58,18 @@ lipsync:
   rms_min: 0.0
   rms_max: 0.3
 
-osc:
-  ip: "127.0.0.1"
-  port: 9000
-  mapping:
-    mouth_open: "MouthOpen"
-    blink: "EyeBlink"
+vtube_studio:
+  enabled: true
+  ws_url: "ws://localhost:8001"        # VTube Studio Plugin API
+  token_file: ".vts_token"             # Se genera automáticamente
+  mouth_param: "MouthOpen"             # INPUT param para lipsync
+  eye_l_param: "EyeOpenLeft"           # INPUT param para parpadeo
+  eye_r_param: "EyeOpenRight"
+  expressions:                         # emotion → nombre de archivo de expresión
+    neutral: "00_IdleFace.exp3.json"
+    happy: "01_HappyFace.exp3.json"
+    sad: "02_CryFace.exp3.json"
+    # Agregar más según tu modelo Live2D
 
 websocket:
   host: "127.0.0.1"

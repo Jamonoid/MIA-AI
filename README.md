@@ -1,6 +1,6 @@
 # MIA-AI
 
-Asistente VTuber local con baja latencia, memoria conversacional RAG, y animación de avatar en tiempo real. Se integra con VTube Studio vía OSC y ofrece un WebUI para monitoreo y control. Soporta entrada de audio por micrófono local y Discord (próximamente).
+Asistente VTuber con baja latencia, memoria conversacional RAG, y animación de avatar en tiempo real. Se integra con VTube Studio vía WebSocket Plugin API y soporta Discord voice channels. Incluye WebUI para monitoreo y control.
 
 **Python:** 3.11+
 **Estado:** Alpha
@@ -13,7 +13,7 @@ Asistente VTuber local con baja latencia, memoria conversacional RAG, y animaci�
 MIA es un pipeline de voz-a-avatar que convierte lo que dices en respuestas habladas con animación facial sincronizada:
 
 ```
-Mic → VAD → STT → RAG → LLM (stream) → TTS (chunked) → Audio + Lipsync → Avatar
+Mic/Discord → VAD → STT → RAG → LLM (stream) → TTS (chunked) → Audio + Lipsync → Avatar
 ```
 
 ### Características
@@ -21,12 +21,13 @@ Mic → VAD → STT → RAG → LLM (stream) → TTS (chunked) → Audio + Lipsy
 - **Baja latencia**: streaming end-to-end, TTS paralelo con entrega ordenada
 - **Memoria RAG**: ChromaDB con embeddings para contexto conversacional persistente
 - **3 backends LLM**: llama-cpp-python (local), LM Studio, OpenRouter (nube)
-- **2 backends TTS**: XTTS v2 (local, clonación de voz) o Edge TTS (online, sin GPU)
+- **TTS**: Edge TTS (online, sin GPU, múltiples voces)
 - **Prompt modular**: archivos `.md` en `prompts/` que se concatenan automáticamente
 - **WebUI**: panel de control con subtítulos, métricas, chat escrito, logs filtrables
-- **VTube Studio**: lipsync + blink automático vía OSC
+- **VTube Studio**: expresiones faciales + lipsync + blink automático vía WebSocket Plugin API
+- **Expresiones inteligentes**: el LLM genera tags de emoción que activan expresiones en el modelo Live2D
 - **Sistema de turnos**: conversaciones como `asyncio.Task` con interrupciones y sincronización frontend↔backend
-- **Discord** *(próximamente)*: escucha en voice channels, identifica quién habla, responde por voz
+- **Discord**: escucha en voice channels, identifica quién habla, responde por voz
 
 ---
 
@@ -73,9 +74,7 @@ Verificar:
 
 ```bash
 uv pip install faster-whisper
-uv pip install TTS
-# Re-instalar CUDA torch (TTS sobreescribe con CPU):
-uv pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+uv pip install websockets
 ```
 
 Para LLM local (opcional):
@@ -83,11 +82,22 @@ Para LLM local (opcional):
 uv pip install llama-cpp-python
 ```
 
+Para Discord (opcional):
+```bash
+uv pip install "py-cord[voice]>=2.6.0" "python-dotenv>=1.0.0"
+# ffmpeg debe estar instalado en el sistema
+```
+
 ### 4. Configurar
 
 ```bash
 cp config.example.yaml config.yaml
 # Editar config.yaml con tu configuración
+```
+
+Para Discord, crear `.env`:
+```
+DISCORD_BOT_TOKEN=tu_token_aquí
 ```
 
 ### 5. Ejecutar
@@ -110,31 +120,32 @@ src/mia/
 
     audio_io.py             Captura de mic + cola de reproducción
     vad.py                  Detección de actividad vocal (energía + pre-roll)
-    stt_whispercpp.py       STT (faster-whisper)
+    stt_whispercpp.py       STT (faster-whisper, GPU)
     llm_llamacpp.py         LLM local (llama-cpp-python)
     llm_lmstudio.py         LLM vía LM Studio (API OpenAI)
     llm_openrouter.py       LLM vía OpenRouter (nube)
-    tts_xtts.py             TTS con chunking (XTTS v2)
     tts_edge.py             TTS con Microsoft Edge (edge-tts)
     rag_memory.py           Memoria conversacional (ChromaDB)
 
     lipsync.py              RMS → mouth_open (0..1)
-    vtube_osc.py            OSC hacia VTube Studio
+    vtube_studio.py         WebSocket Plugin API hacia VTube Studio
     ws_server.py            WebSocket + servidor HTTP para WebUI
+    discord_bot.py          Bot Discord con voice (py-cord)
+    discord_sink.py         ContinuousVoiceSink para audio Discord
 
     conversations/          Sistema de turnos de conversación
       types.py              Type aliases y dataclasses compartidas
       message_handler.py    Sincronización frontend↔backend
-      tts_manager.py        TTS paralelo con entrega ordenada
+      tts_manager.py        TTS paralelo con entrega ordenada + lipsync callback
       conversation_handler.py   Entry point: triggers → tasks
       single_conversation.py    Flujo completo de un turno
       conversation_utils.py     Helpers (señales, cleanup)
 
-prompts/                    Prompt modular (archivos .md)
+prompts/                    Prompt modular (archivos .md, gitignored)
 web/                        WebUI (HTML/CSS/JS)
 data/chroma_db/             Vector store persistente
 tests/                      Tests unitarios (33 tests)
-config.yaml                 Configuración central
+config.yaml                 Configuración central (gitignored)
 ```
 
 ---
@@ -151,11 +162,10 @@ Toda la configuración en `config.yaml`. Ver `config.example.yaml` como referenc
 | **lmstudio** | LM Studio (API OpenAI) | `backend: "lmstudio"`, `base_url: "http://localhost:1234/v1"` |
 | **openrouter** | OpenRouter (nube) | `backend: "openrouter"`, `api_key: "sk-or-..."` |
 
-### Backends de TTS
+### TTS
 
 | Backend | Requiere GPU | Configuración |
 |---------|-------------|---------------|
-| **xtts** | Sí (~2 GB VRAM) | `backend: "xtts"`, necesita WAV de referencia |
 | **edge** | No (online) | `backend: "edge"`, `edge_voice: "es-CL-CatalinaNeural"` |
 
 Listar voces Edge disponibles: `edge-tts --list-voices`
@@ -166,11 +176,54 @@ En vez de un string en `prompt.system`, MIA carga archivos `.md` de la carpeta `
 
 ```
 prompts/
-  personality.md    → Personalidad y estilo
   expressions.md    → Instrucciones de expresiones faciales
+  personality.md    → Personalidad y estilo
 ```
 
 Se concatenan alfabéticamente para armar el system prompt. Si la carpeta no existe, usa el fallback `prompt.system`.
+
+---
+
+## VTube Studio
+
+MIA se conecta a VTube Studio mediante la WebSocket Plugin API para controlar el modelo Live2D en tiempo real.
+
+### Setup
+
+1. Abrir VTube Studio
+2. Ir a configuración → habilitar API (puerto 8001)
+3. Iniciar MIA → aceptar popup de autenticación en VTube Studio
+4. El token se guarda en `.vts_token` para sesiones futuras
+
+### Expresiones
+
+El LLM genera tags de emoción al inicio de cada respuesta:
+```
+[happy] ¡Hola! ¿Cómo estás?
+```
+
+MIA parsea el tag, activa la expresión correspondiente en VTube Studio, y envía solo el texto limpio a TTS.
+
+Emociones soportadas: neutral, happy, sad, angry, surprised, scared, ashamed, pout, cry, super_happy
+
+### Lipsync
+
+MIA inyecta valores de `MouthOpen` en tiempo real procesando el audio TTS en sub-chunks de 20ms con timing basado en reloj para mantener sincronización.
+
+### Configuración
+
+```yaml
+vtube_studio:
+  enabled: true
+  ws_url: "ws://localhost:8001"
+  mouth_param: "MouthOpen"        # Nombre INPUT (tracking), no OUTPUT (Live2D)
+  eye_l_param: "EyeOpenLeft"
+  eye_r_param: "EyeOpenRight"
+  expressions:
+    neutral: "00_IdleFace.exp3.json"
+    happy: "01_HappyFace.exp3.json"
+    # ... etc (solo nombre de archivo, sin carpeta)
+```
 
 ---
 
@@ -188,10 +241,23 @@ Panel de control accesible en `http://localhost:8080`:
 
 ---
 
-## VTube Studio
+## Discord
 
-1. Habilitar receptor OSC en VTube Studio (puerto 9000)
-2. Los parámetros `MouthOpen` y `EyeBlink` se actualizan automáticamente
+MIA puede unirse a canales de voz de Discord, escuchar a los usuarios, y responder por voz.
+
+### Setup
+
+1. Crear bot en Discord Developer Portal
+2. Instalar `py-cord[voice]` y `ffmpeg`
+3. Agregar token en `.env`
+4. Habilitar `discord.enabled: true` en `config.yaml`
+5. Usar `/join` para que MIA entre al canal de voz
+
+### Características
+
+- Multi-speaker: identifica quién habla
+- Silence detection: detecta fin de grupo de mensajes
+- TTS → FFmpeg → voice playback
 
 ---
 
@@ -209,15 +275,16 @@ Panel de control accesible en `http://localhost:8080`:
 
 | Componente | Tecnología |
 |------------|------------|
-| STT | faster-whisper (CTranslate2) |
+| STT | faster-whisper (CTranslate2, GPU) |
 | LLM | llama-cpp-python / LM Studio / OpenRouter |
-| TTS | Coqui TTS (XTTS v2) / Edge TTS |
+| TTS | Edge TTS (Microsoft) |
 | VAD | Energía (RMS) con pre-roll buffer |
 | Lipsync | RMS con suavizado exponencial |
-| Avatar | VTube Studio (OSC) / WebSocket |
+| Avatar | VTube Studio (WebSocket Plugin API) |
 | Memoria | ChromaDB + sentence-transformers |
 | Audio | sounddevice (PortAudio) / Web Audio API |
 | WebUI | Vanilla HTML/CSS/JS |
+| Discord | py-cord (voice channels) |
 | Config | YAML → dataclasses tipados |
 
 ---
@@ -226,7 +293,8 @@ Panel de control accesible en `http://localhost:8080`:
 
 | Problema | Solución |
 |----------|----------|
-| `TTS` instala torch CPU | Re-ejecutar paso 2 de instalación después |
-| `transformers>=4.44` rompe TTS | Fijado a `<4.44` en pyproject.toml |
-| `torch.load weights_only` | Parcheado automáticamente en `tts_xtts.py` |
+| `TTS` instala torch CPU | Re-ejecutar instalación de CUDA torch después |
+| numpy binary incompatibility | `uv pip install --force-reinstall chromadb chroma-hnswlib` |
+| VTS no reacciona a expresiones | Verificar nombres de archivo (sin prefijo `expressions/`) |
+| VTS no hace lipsync | Usar nombres INPUT (`MouthOpen`) no OUTPUT (`ParamMouthOpenY`) |
 | Windows symlinks (Hugging Face) | Usar `HF_HUB_DISABLE_SYMLINKS=1` |

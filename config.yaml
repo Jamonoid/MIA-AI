@@ -53,12 +53,23 @@ lipsync:
   rms_min: 0.0
   rms_max: 0.3
 
-osc:
-  ip: "127.0.0.1"
-  port: 9000
-  mapping:
-    mouth_open: "MouthOpen"
-    blink: "EyeBlink"
+vtube_studio:
+  enabled: true
+  ws_url: "ws://localhost:8001"
+  token_file: ".vts_token"
+  mouth_param: "MouthOpen"
+  eye_l_param: "EyeOpenLeft"
+  eye_r_param: "EyeOpenRight"
+  expressions:
+    neutral: "00_IdleFace.exp3.json"
+    happy: "01_HappyFace.exp3.json"
+    cry: "02_CryFace.exp3.json"
+    pout: "03_PoutFace.exp3.json"
+    angry: "04_AngryFace.exp3.json"
+    ashamed: "05_AshamedFace.exp3.json"
+    scared: "06_ScaredFace.exp3.json"
+    sad: "07_SadFace.exp3.json"
+    super_happy: "08_SuperHappyFace.exp3.json"
 
 websocket:
   host: "127.0.0.1"

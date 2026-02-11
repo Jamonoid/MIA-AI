@@ -62,7 +62,7 @@ class MIADiscordBot:
         rag: Any = None,
         audio_player: Any = None,
         lipsync: Any = None,
-        osc: Any = None,
+        osc: Any = None,  # VTubeStudioClient (legacy param name)
         ws_server: Any = None,
         executor: ThreadPoolExecutor,
         chat_history: list[dict[str, str]],
@@ -788,7 +788,9 @@ class MIADiscordBot:
                 except Exception as e:
                     logger.debug("Lipsync error: %s", e)
 
-            if self._audio_player:
+            # Only play locally if NOT in Discord-only mode
+            # (voice_receive_enabled means audio mode is 'discord')
+            if self._audio_player and not self._voice_receive_enabled:
                 try:
                     self._audio_player.enqueue(audio)
                 except Exception as e:

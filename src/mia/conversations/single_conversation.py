@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Optional
@@ -88,9 +89,38 @@ async def process_single_conversation(
     if metadata is None:
         metadata = ConversationMetadata()
 
+    # Build lipsync callback for VTS mouth sync
+    _lipsync_callback = None
+    if lipsync and osc:
+        async def _lipsync_callback(audio_chunk: np.ndarray) -> None:
+            sub_size = int(playback_sample_rate * 0.02)  # 20ms chunks
+            total_subs = max(1, len(audio_chunk) // sub_size)
+            chunk_duration = 0.02  # seconds per sub-chunk
+
+            # Small delay for frontend WebSocket receive + decode latency
+            await asyncio.sleep(0.15)
+
+            loop_time = asyncio.get_event_loop().time
+            start = loop_time()
+
+            for i in range(total_subs):
+                s = i * sub_size
+                e = min(s + sub_size, len(audio_chunk))
+                sub = audio_chunk[s:e]
+                mouth_val = lipsync.process(sub)
+                osc.send_mouth(mouth_val)
+
+                # Sleep until next sub-chunk's exact target time (drift-free)
+                target = start + (i + 1) * chunk_duration
+                remaining = target - loop_time()
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
+            # Do NOT close mouth here — more chunks may follow
+
     tts_manager = TTSTaskManager(
         tts, sample_rate=getattr(tts, "sample_rate", playback_sample_rate),
         executor=executor,
+        on_audio_ready=_lipsync_callback,
     )
 
     try:
@@ -149,6 +179,7 @@ async def process_single_conversation(
             websocket_send=websocket_send,
             executor=executor,
             chunk_size=chunk_size,
+            vts=osc,
         )
 
         logger.info("🤖 MIA: %s", full_response)
@@ -164,6 +195,11 @@ async def process_single_conversation(
         await finalize_conversation_turn(
             websocket_send, tts_manager, client_uid
         )
+
+        # ── Reset lipsync after all audio is done ──
+        if lipsync and osc:
+            osc.send_mouth(0.0)
+            lipsync.reset()
 
         # ── 11. Guardar en historial y RAG ──
         if not metadata.skip_history:
@@ -212,11 +248,12 @@ async def _generate_with_parallel_tts(
     websocket_send: WebSocketSend,
     executor: ThreadPoolExecutor,
     chunk_size: int,
+    vts: Any = None,
 ) -> str:
     """Genera respuesta LLM y envía chunks a TTS en paralelo.
 
     Returns:
-        Texto completo de la respuesta.
+        Texto completo de la respuesta (sin emotion tag).
     """
     loop = asyncio.get_event_loop()
 
@@ -234,6 +271,15 @@ async def _generate_with_parallel_tts(
     if not full_response.strip():
         return full_response
 
+    # ── Parsear emoción y limpiar texto ──
+    emotion, clean_text = _parse_emotion(full_response)
+    if emotion and vts:
+        try:
+            await vts.set_expression(emotion)
+        except Exception as e:
+            logger.debug("VTS expression error: %s", e)
+    full_response = clean_text
+
     # Dividir en chunks y lanzar TTS paralelo
     text_chunks = chunk_text(full_response, chunk_size)
 
@@ -247,3 +293,13 @@ async def _generate_with_parallel_tts(
         )
 
     return full_response
+
+
+def _parse_emotion(text: str) -> tuple[str | None, str]:
+    """Extract [emotion] tag from LLM response."""
+    match = re.match(r"^\s*\[(\w+)\]\s*", text)
+    if match:
+        emotion = match.group(1).lower()
+        clean_text = text[match.end():].strip()
+        return emotion, clean_text
+    return None, text

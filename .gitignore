@@ -44,6 +44,7 @@ data/chroma_db/
 .env
 .envrc
 *.secret
+.vts_token
 config.yaml
 config.local.yaml
 
@@ -89,4 +90,4 @@ pip-log.txt
 
 # ── Guías privadas (contienen secrets) ──
 discord_bot_guide.md
-prompts/
+prompts/**

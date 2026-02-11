@@ -42,8 +42,7 @@ class MIAPipeline:
         self._llm = None
         self._tts = None
         self._lipsync = None
-        self._osc = None
-        self._blink_ctrl = None
+        self._vts = None  # VTube Studio client
         self._ws = None
         self._rag = None
         self._conversation_handler = None
@@ -113,12 +112,8 @@ class MIAPipeline:
 
         self._lipsync = RMSLipsync(self.config.lipsync)
 
-        # OSC / VTube Studio
-        from .vtube_osc import VTubeBlinkController, VTubeOSC
-
-        self._osc = VTubeOSC(self.config.osc)
-        self._osc.connect()
-        self._blink_ctrl = VTubeBlinkController(self._osc)
+        # VTube Studio (WebSocket – se conecta en run() porque es async)
+        self._vts = None  # Inicializado en run()
 
         # WebSocket
         from .ws_server import WSServer
@@ -190,7 +185,7 @@ class MIAPipeline:
             stt=self._stt,
             rag=self._rag,
             ws_server=self._ws,
-            osc=self._osc,
+            osc=self._vts,
             lipsync=self._lipsync,
             audio_player=self._audio_player,
             executor=self._executor,
@@ -231,8 +226,20 @@ class MIAPipeline:
         # Iniciar servicios de fondo
         self._audio_capture.start()
         self._audio_player.start()
-        self._blink_ctrl.start()
         await self._ws.start()
+
+        # VTube Studio (async connect)
+        if self.config.vtube_studio.enabled:
+            from .vtube_studio import VTubeStudioClient
+            self._vts = VTubeStudioClient(self.config.vtube_studio)
+            vts_ok = await self._vts.connect()
+            if not vts_ok:
+                logger.warning("VTube Studio no disponible, continuando sin avatar")
+                self._vts = None
+            else:
+                # Update refs in already-created components
+                if self._conversation_handler:
+                    self._conversation_handler._osc = self._vts
 
         # Crear e iniciar Discord bot DENTRO del async context
         # (py-cord almacena asyncio.get_event_loop() en Bot.__init__,
@@ -249,7 +256,7 @@ class MIAPipeline:
                 rag=self._rag,
                 audio_player=self._audio_player,
                 lipsync=self._lipsync,
-                osc=self._osc,
+                osc=self._vts,
                 ws_server=self._ws,
                 executor=self._executor,
                 chat_history=self._chat_history,
@@ -448,7 +455,14 @@ class MIAPipeline:
             )
 
         full_response = await loop.run_in_executor(self._executor, _generate)
-        logger.info("🤖 MIA: %s", full_response)
+
+        # ── Parsear emoción del LLM ──
+        emotion, clean_text = self._parse_emotion(full_response)
+        if emotion and self._vts:
+            await self._vts.set_expression(emotion)
+        # Usar texto limpio (sin tag) para TTS y display
+        full_response = clean_text
+        logger.info("🤖 MIA [%s]: %s", emotion or "neutral", full_response)
 
         if self._ws.enabled:
             await self._ws.send_subtitle(full_response, role="assistant")
@@ -479,7 +493,8 @@ class MIAPipeline:
 
         # Resetear boca
         self._lipsync.reset()
-        self._osc.send_mouth(0.0)
+        if self._vts:
+            self._vts.send_mouth(0.0)
         if self._ws.enabled:
             await self._ws.send_mouth(0.0)
 
@@ -517,13 +532,32 @@ class MIAPipeline:
             sub = audio[start:end]
 
             mouth_value = self._lipsync.process(sub)
-            self._osc.send_mouth(mouth_value)
+            if self._vts:
+                self._vts.send_mouth(mouth_value)
 
             if self._ws.enabled:
                 await self._ws.send_mouth(mouth_value)
 
             # Simular timing real (20ms por sub-chunk)
             await asyncio.sleep(0.02)
+
+    # ──────────────────────────────────────────
+    # Emotion parsing
+    # ──────────────────────────────────────────
+
+    @staticmethod
+    def _parse_emotion(text: str) -> tuple[str | None, str]:
+        """Extract [emotion] tag from LLM response.
+
+        Returns (emotion, clean_text) — emotion is None if no tag found.
+        """
+        import re
+        match = re.match(r"^\s*\[(\w+)\]\s*", text)
+        if match:
+            emotion = match.group(1).lower()
+            clean_text = text[match.end():].strip()
+            return emotion, clean_text
+        return None, text
 
     # ──────────────────────────────────────────
     # Shutdown
@@ -541,14 +575,12 @@ class MIAPipeline:
             except Exception as e:
                 logger.debug("Error cerrando Discord bot: %s", e)
 
-        if self._blink_ctrl:
-            self._blink_ctrl.stop()
         if self._audio_capture:
             self._audio_capture.stop()
         if self._audio_player:
             self._audio_player.stop()
-        if self._osc:
-            self._osc.close()
+        if self._vts:
+            await self._vts.close()
         if self._ws:
             await self._ws.stop()
 

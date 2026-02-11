@@ -89,10 +89,12 @@ class TTSTaskManager:
         tts_engine: TTSEngine,
         sample_rate: int = 24000,
         executor: Optional[ThreadPoolExecutor] = None,
+        on_audio_ready: Optional[Callable[[np.ndarray], Any]] = None,
     ) -> None:
         self.tts_engine = tts_engine
         self.sample_rate = sample_rate
         self._executor = executor or ThreadPoolExecutor(max_workers=3)
+        self._on_audio_ready = on_audio_ready
 
         self.task_list: list[asyncio.Task] = []
         self._payload_queue: asyncio.Queue = asyncio.Queue()
@@ -209,6 +211,15 @@ class TTSTaskManager:
             }
 
             await self._payload_queue.put((payload, sequence_number))
+
+            # Lipsync callback (runs after audio is queued for frontend)
+            if self._on_audio_ready is not None:
+                try:
+                    result = self._on_audio_ready(audio)
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as e:
+                    logger.debug("on_audio_ready error: %s", e)
 
             logger.debug(
                 "TTS seq=%d listo: '%s...' (%d samples)",
