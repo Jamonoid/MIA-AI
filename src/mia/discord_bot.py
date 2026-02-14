@@ -19,9 +19,12 @@ import re
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 import numpy as np
+
+from .tts_filter import tts_filter
 
 try:
     import discord
@@ -36,7 +39,6 @@ from .discord_sink import GroupVoiceSink, SpeakerData
 
 logger = logging.getLogger(__name__)
 
-_EMOTION_RE = re.compile(r"\[\w+\]\s*")
 _NAME_PREFIX_RE = re.compile(r"^\s*(?:MIA|Mia|mia)\s*:\s*")
 
 
@@ -76,6 +78,24 @@ class MIADiscordBot:
         self._processing = False  # Guard para evitar respuestas simultáneas
         self._voice_receive_enabled = True  # Siempre activo en Discord-only
 
+        # ── Event bus (for WebUI) ──
+        self._event_callbacks: list[Callable] = []
+        self._bot_state: str = "listening"  # listening|paused|processing|speaking|proactive
+
+        # ── Proactive mode (defaults; controlled from WebUI) ──
+        self._proactive_mode: bool = False
+        self._proactive_idle_seconds: int = 30
+        self._proactive_prompt: str = ""
+        self._proactive_timer_task: Optional[asyncio.Task] = None
+        self._last_voice_activity: float = time.monotonic()
+        self._load_proactive_prompt()
+
+        # ── STT filters ──
+        self._stt_hallucinations: set[str] = {
+            h.lower().strip() for h in config.stt.stt_hallucinations
+        }
+        self._min_energy_rms: float = 0.01  # configurable solo desde WebUI
+
         # Configurar intents
         intents = discord.Intents.default()
         intents.message_content = True
@@ -96,11 +116,282 @@ class MIADiscordBot:
     # ──────────────────────────────────────────
 
     @staticmethod
-    def _strip_emotion_tags(text: str) -> str:
-        """Elimina tags de emoción [tag] y prefijo 'MIA:' del texto."""
-        text = _EMOTION_RE.sub("", text).strip()
-        text = _NAME_PREFIX_RE.sub("", text).strip()
-        return text
+    def _clean_llm_output(text: str) -> str:
+        """Limpia el output del LLM: quita prefijo 'MIA:' si aparece."""
+        return _NAME_PREFIX_RE.sub("", text).strip()
+
+    def _load_proactive_prompt(self) -> None:
+        """Carga el prompt proactivo desde archivo."""
+        prompt_dir = Path(getattr(self._config.prompt, "dir", "./prompts/"))
+        path = prompt_dir / "06_proactive.md"
+        if path.is_file():
+            self._proactive_prompt = path.read_text(encoding="utf-8").strip()
+            logger.info("Proactive prompt cargado desde %s", path)
+        else:
+            self._proactive_prompt = (
+                "Nadie ha hablado en un rato. Inicia conversación de forma natural."
+            )
+
+    # ──────────────────────────────────────────
+    # Event bus (WebUI integration)
+    # ──────────────────────────────────────────
+
+    def on_event(self, callback: Callable) -> None:
+        """Registra un callback para eventos. Firma: callback(event_type, data)"""
+        self._event_callbacks.append(callback)
+
+    async def _emit(self, event_type: str, data: Any = None) -> None:
+        """Emite un evento a todos los listeners."""
+        for cb in self._event_callbacks:
+            try:
+                result = cb(event_type, data)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                logger.debug("Event callback error", exc_info=True)
+
+    async def _set_bot_state(self, state: str) -> None:
+        """Cambia el estado del bot y notifica."""
+        self._bot_state = state
+        await self._emit("state_change", {"key": "bot_state", "value": state})
+
+    def get_state(self) -> dict:
+        """Devuelve estado actual para WebUI."""
+        rag_docs = 0
+        if self._rag:
+            try:
+                rag_docs = self._rag._collection.count() if hasattr(self._rag, "_collection") else 0
+            except Exception:
+                rag_docs = 0
+
+        vc_members = 0
+        if self._voice_client and self._voice_client.channel:
+            vc_members = len(self._voice_client.channel.members)
+
+        return {
+            "paused": not self._voice_receive_enabled,
+            "proactive": self._proactive_mode,
+            "text_responses": self._text_responses_enabled,
+            "rag_enabled": self._config.rag.enabled,
+            "idle_seconds": self._proactive_idle_seconds,
+            "silence_ms": self._config.discord.group_silence_ms,
+            "min_energy_rms": self._min_energy_rms,
+            "bot_state": self._bot_state,
+            "stats": {
+                "speakers": vc_members,
+                "history": len(self._chat_history),
+                "rag_docs": rag_docs,
+            },
+            "chat_history": [
+                {
+                    "speaker": msg["role"].replace("assistant", "MIA").replace("user", "User"),
+                    "text": msg["content"],
+                }
+                for msg in self._chat_history
+            ],
+        }
+
+    async def handle_webui_command(self, command: str, value: Any) -> None:
+        """Procesa comandos del WebUI."""
+        if command == "toggle_pause":
+            if value:
+                await self.disable_voice_receive()
+                await self._set_bot_state("paused")
+            else:
+                await self.enable_voice_receive()
+                await self._set_bot_state("listening")
+
+        elif command == "toggle_proactive":
+            self._proactive_mode = bool(value)
+            if self._proactive_mode:
+                self._start_proactive_timer()
+            else:
+                self._stop_proactive_timer()
+            await self._emit("state_change", {"key": "proactive", "value": self._proactive_mode})
+            logger.info("Proactive mode: %s", "ON" if self._proactive_mode else "OFF")
+
+        elif command == "toggle_text_responses":
+            self._text_responses_enabled = bool(value)
+            await self._emit("state_change", {"key": "text_responses", "value": self._text_responses_enabled})
+
+        elif command == "toggle_rag":
+            self._config.rag.enabled = bool(value)
+            await self._emit("state_change", {"key": "rag_enabled", "value": self._config.rag.enabled})
+
+        elif command == "set_idle_seconds":
+            self._proactive_idle_seconds = max(10, min(120, int(value)))
+            await self._emit("state_change", {"key": "idle_seconds", "value": self._proactive_idle_seconds})
+            logger.info("Proactive idle: %ds", self._proactive_idle_seconds)
+
+        elif command == "set_silence_ms":
+            ms = max(500, min(5000, int(value)))
+            self._config.discord.group_silence_ms = ms
+            if self._voice_sink:
+                self._voice_sink._group_silence_ms = ms
+                # Also update the running inner sink
+                if self._voice_sink._sink:
+                    self._voice_sink._sink.group_silence_ms = ms
+            await self._emit("state_change", {"key": "silence_ms", "value": ms})
+
+        elif command == "clear_history":
+            self._chat_history.clear()
+            await self._emit("state_change", {"key": "history_cleared", "value": True})
+            logger.info("Chat history cleared")
+
+        elif command == "set_min_energy":
+            self._min_energy_rms = max(0.001, min(0.05, float(value)))
+            await self._emit("state_change", {"key": "min_energy_rms", "value": self._min_energy_rms})
+            logger.info("Min energy RMS: %.3f", self._min_energy_rms)
+
+        elif command == "force_speak":
+            if not self._processing and self._voice_client and self._voice_client.is_connected():
+                logger.info("WebUI: force speak triggered")
+                asyncio.ensure_future(self._trigger_proactive_speech())
+            else:
+                logger.info("WebUI: force speak ignored (processing or disconnected)")
+
+        elif command == "reconnect_voice":
+            logger.info("WebUI: reconnect voice triggered")
+            asyncio.ensure_future(self._reconnect_voice())
+
+    # ──────────────────────────────────────────
+    # Voice reconnect
+    # ──────────────────────────────────────────
+
+    async def _reconnect_voice(self) -> None:
+        """Desconecta y reconecta al mismo voice channel."""
+        try:
+            channel = None
+            if self._voice_client and self._voice_client.channel:
+                channel = self._voice_client.channel
+
+            # Detener escucha y desconectar
+            await self._stop_voice_receive()
+            if self._voice_client:
+                try:
+                    await self._voice_client.disconnect(force=True)
+                except Exception:
+                    pass
+                self._voice_client = None
+
+            if not channel:
+                logger.warning("Reconnect: no hay canal previo")
+                await self._emit("chat_message", {"speaker": "SYSTEM", "text": "❌ No hay canal de voz previo"})
+                return
+
+            # Reconectar
+            await self._set_bot_state("processing")
+            self._voice_client = await channel.connect()
+            await self._start_voice_receive()
+            await self._set_bot_state("listening")
+            logger.info("Reconnect: reconectada a '%s'", channel.name)
+            await self._emit("chat_message", {"speaker": "SYSTEM", "text": f"🌀 Reconectada a {channel.name}"})
+
+        except Exception:
+            logger.exception("Reconnect: error")
+            await self._emit("chat_message", {"speaker": "SYSTEM", "text": "❌ Error reconectando"})
+            await self._set_bot_state("listening")
+
+    # ──────────────────────────────────────────
+    # Proactive mode
+    # ──────────────────────────────────────────
+
+    def _start_proactive_timer(self) -> None:
+        """Inicia el timer para habla proactiva."""
+        self._stop_proactive_timer()
+        self._last_voice_activity = time.monotonic()
+        self._proactive_timer_task = asyncio.ensure_future(self._proactive_loop())
+
+    def _stop_proactive_timer(self) -> None:
+        """Detiene el timer proactivo."""
+        if self._proactive_timer_task and not self._proactive_timer_task.done():
+            self._proactive_timer_task.cancel()
+            self._proactive_timer_task = None
+
+    async def _proactive_loop(self) -> None:
+        """Loop que chequea si debe hablar proactivamente."""
+        try:
+            while self._proactive_mode:
+                # Intervalo de check — más rápido si idle_seconds es bajo
+                check_interval = max(2, self._proactive_idle_seconds // 5)
+                await asyncio.sleep(check_interval)
+
+                if not self._proactive_mode:
+                    break
+                if self._processing:
+                    continue
+                if not self._voice_client or not self._voice_client.is_connected():
+                    continue
+
+                elapsed = time.monotonic() - self._last_voice_activity
+                if elapsed >= self._proactive_idle_seconds:
+                    logger.info("Proactive: %.0fs sin voz, hablando...", elapsed)
+                    await self._trigger_proactive_speech()
+                    self._last_voice_activity = time.monotonic()  # Reset
+
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Proactive loop error")
+
+    async def _trigger_proactive_speech(self) -> None:
+        """Pregunta al LLM si tiene algo que decir. Solo habla si dice que sí."""
+        try:
+            self._processing = True
+            loop = asyncio.get_event_loop()
+
+            # Paso 1: Preguntar al LLM si quiere hablar
+            decision_input = f"[SISTEMA]: {self._proactive_prompt}"
+
+            def _decide() -> str:
+                return "".join(
+                    self._llm.generate_stream(
+                        decision_input, "", self._chat_history
+                    )
+                )
+
+            raw = await loop.run_in_executor(self._executor, _decide)
+            raw = self._clean_llm_output(raw)
+
+            # Si el LLM decide no hablar
+            if not raw or raw.upper().startswith("NO"):
+                logger.info("Proactive: LLM decidió no hablar")
+                return
+
+            # Paso 2: El LLM quiere hablar — reproducir
+            logger.info("Proactive MIA: %s", raw)
+            await self._set_bot_state("proactive")
+            await self._stop_voice_receive()
+
+            # TTS
+            def _synthesize() -> "np.ndarray":
+                return self._tts.synthesize(tts_filter(raw))
+
+            audio = await loop.run_in_executor(self._executor, _synthesize)
+            if audio is not None and len(audio) > 0:
+                await self._play_in_discord(audio)
+
+            # Historial
+            self._chat_history.append({"role": "assistant", "content": raw})
+            if len(self._chat_history) > 20:
+                self._chat_history[:] = self._chat_history[-12:]
+
+            await self._emit("chat_message", {
+                "speaker": "MIA",
+                "text": raw,
+                "proactive": True,
+            })
+
+        except Exception:
+            logger.exception("Proactive speech error")
+        finally:
+            self._processing = False
+            try:
+                if self._voice_client and self._voice_client.is_connected():
+                    await self._start_voice_receive()
+            except Exception:
+                logger.exception("Proactive: error reiniciando voice receive")
+            await self._set_bot_state("listening")
 
     # ──────────────────────────────────────────
     # Events
@@ -562,16 +853,35 @@ class MIADiscordBot:
         self._voice_receive_enabled = True
         if self._voice_client and self._voice_client.is_connected():
             await self._start_voice_receive()
+        await self._set_bot_state("listening")
         logger.info("Discord: voice receive HABILITADO")
 
     async def disable_voice_receive(self) -> None:
         """Deshabilita la recepción de audio (llamado por audio mode toggle)."""
         self._voice_receive_enabled = False
         await self._stop_voice_receive()
+        await self._set_bot_state("paused")
         logger.info("Discord: voice receive DESHABILITADO")
+
+    def _on_audio_level(self, rms: float) -> None:
+        """Callback del sink — emite nivel RMS al WebUI (throttled)."""
+        # Called from recv_audio thread — use bot's loop to schedule safely
+        try:
+            if self._event_callbacks:
+                loop = self.bot.loop
+                if loop and loop.is_running():
+                    loop.call_soon_threadsafe(
+                        lambda r=rms: asyncio.ensure_future(
+                            self._emit("audio_level", {"rms": round(r, 4)})
+                        )
+                    )
+        except Exception:
+            pass
 
     async def _start_voice_receive(self) -> None:
         """Inicia la recepción de audio del voice channel."""
+        if not self._voice_receive_enabled:
+            return
         if not self._voice_client or not self._voice_client.is_connected():
             return
 
@@ -582,6 +892,7 @@ class MIADiscordBot:
             voice_client=self._voice_client,
             group_silence_ms=self._config.discord.group_silence_ms,
             on_group_silence=self._on_group_silence,
+            on_audio_level=self._on_audio_level,
             bot_user_id=self.bot.user.id if self.bot.user else None,
         )
         await self._voice_sink.start()
@@ -612,6 +923,10 @@ class MIADiscordBot:
         try:
             # Dejar de escuchar mientras procesamos
             await self._stop_voice_receive()
+            await self._set_bot_state("processing")
+
+            # Reset proactive timer — alguien habló
+            self._last_voice_activity = time.monotonic()
 
             # STT per speaker
             loop = asyncio.get_event_loop()
@@ -629,6 +944,12 @@ class MIADiscordBot:
                 if len(audio) < 8000:  # < 500ms a 16kHz — evita alucinaciones de Whisper
                     continue
 
+                # Filtro de energía RMS
+                rms = float(np.sqrt(np.mean(audio ** 2)))
+                if rms < self._min_energy_rms:
+                    logger.debug("STT skip [%s]: energía %.4f < %.4f", name, rms, self._min_energy_rms)
+                    continue
+
                 text = await loop.run_in_executor(
                     self._executor,
                     self._stt.transcribe,
@@ -636,9 +957,21 @@ class MIADiscordBot:
                     16000,
                 )
 
-                if text and len(text.strip()) >= 2:
-                    speaker_texts.append((name, text.strip()))
-                    logger.info("Discord STT [%s]: %s", name, text.strip())
+                if not text or len(text.strip()) < 2:
+                    continue
+
+                # Filtro de alucinaciones de Whisper
+                if text.strip().lower().rstrip(".!?¡¿") in self._stt_hallucinations:
+                    logger.info("STT hallucination filtered [%s]: '%s'", name, text.strip())
+                    continue
+
+                speaker_texts.append((name, text.strip()))
+                logger.info("Discord STT [%s]: %s", name, text.strip())
+                # Emit chat event for each speaker
+                await self._emit("chat_message", {
+                    "speaker": name,
+                    "text": text.strip(),
+                })
 
             if not speaker_texts:
                 logger.debug("Discord: sin texto útil transcrito")
@@ -656,18 +989,30 @@ class MIADiscordBot:
             logger.info("Discord multi-speaker:\n%s", labeled_input)
 
             # Generar respuesta con voz
+            await self._set_bot_state("speaking")
             response = await self._generate_and_speak(labeled_input)
 
             if response:
                 logger.info("Discord MIA: %s", response)
+                await self._emit("chat_message", {
+                    "speaker": "MIA",
+                    "text": response,
+                })
 
         except Exception:
             logger.exception("Discord: error procesando group silence")
         finally:
             self._processing = False
+            self._last_voice_activity = time.monotonic()
             # Reanudar escucha después de todo el pipeline
-            if self._voice_client and self._voice_client.is_connected():
-                await self._start_voice_receive()
+            try:
+                if self._voice_client and self._voice_client.is_connected():
+                    await self._start_voice_receive()
+            except Exception:
+                logger.exception("Discord: error reiniciando voice receive")
+            await self._set_bot_state("listening")
+            # Emit stats update
+            await self._emit("stats", self.get_state().get("stats", {}))
 
     # ──────────────────────────────────────────
     # Response generation + dual audio
@@ -696,8 +1041,7 @@ class MIADiscordBot:
 
         response = await loop.run_in_executor(self._executor, _generate)
 
-        # Strip emotion tags
-        clean_response = self._strip_emotion_tags(response)
+        clean_response = self._clean_llm_output(response)
 
         # Guardar en historial
         if clean_response.strip():
@@ -723,7 +1067,7 @@ class MIADiscordBot:
         """Genera respuesta y reproduce en Discord.
 
         Returns:
-            Texto limpio de la respuesta (sin emotion tags).
+            Texto limpio de la respuesta.
         """
         loop = asyncio.get_event_loop()
 
@@ -746,8 +1090,7 @@ class MIADiscordBot:
 
         raw_response = await loop.run_in_executor(self._executor, _generate)
 
-        # Strip emotion tags antes de TTS
-        clean_response = self._strip_emotion_tags(raw_response)
+        clean_response = self._clean_llm_output(raw_response)
         logger.info("🤖 MIA: %s", clean_response[:80])
 
         if not clean_response.strip():
@@ -755,7 +1098,7 @@ class MIADiscordBot:
 
         # TTS
         def _synthesize() -> np.ndarray:
-            return self._tts.synthesize(clean_response)
+            return self._tts.synthesize(tts_filter(clean_response))
 
         audio_data = await loop.run_in_executor(self._executor, _synthesize)
 

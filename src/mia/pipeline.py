@@ -106,6 +106,13 @@ class MIAPipeline:
         self._discord_token = token
         logger.info("Discord token detectado (%d chars) ✓", len(token))
 
+        # ── WebUI ──
+        self._web_server = None
+        if self.config.webui.enabled:
+            from .web_server import MIAWebServer
+            self._web_server = MIAWebServer(port=self.config.webui.port)
+            logger.info("WebUI: configurado en puerto %d", self.config.webui.port)
+
         logger.info("═══ Módulos cargados ═══")
 
     # ──────────────────────────────────────────
@@ -149,7 +156,7 @@ class MIAPipeline:
     # ──────────────────────────────────────────
 
     async def run(self) -> None:
-        """Inicia el bot de Discord y espera."""
+        """Inicia el bot de Discord y el WebUI server."""
         self._running = True
 
         logger.info("Discord: creando bot...")
@@ -174,8 +181,61 @@ class MIAPipeline:
             )
             return
 
+        # ── Wire WebUI ↔ Discord bot ──
+        if self._web_server and self._discord_bot:
+            # Bot events → WebSocket broadcast
+            self._discord_bot.on_event(
+                lambda event_type, data: self._web_server.broadcast(event_type, data)
+            )
+            # WebUI commands → Bot handler
+            self._web_server.set_command_handler(
+                self._discord_bot.handle_webui_command
+            )
+            # State provider
+            self._web_server.set_state_provider(
+                self._discord_bot.get_state
+            )
+
+            # ── Log forwarding → WebUI ──
+            class _WebUILogHandler(logging.Handler):
+                """Forwards log records to WebSocket clients."""
+                def __init__(self, server: Any) -> None:
+                    super().__init__()
+                    self._server = server
+                    self._loop: asyncio.AbstractEventLoop | None = None
+
+                def emit(self, record: logging.LogRecord) -> None:
+                    try:
+                        if not self._loop or not self._loop.is_running():
+                            self._loop = asyncio.get_event_loop()
+                        msg = self.format(record)
+                        self._loop.call_soon_threadsafe(
+                            lambda m=msg, lvl=record.levelname: asyncio.ensure_future(
+                                self._server.broadcast("log", {
+                                    "level": lvl,
+                                    "text": m,
+                                })
+                            )
+                        )
+                    except Exception:
+                        pass
+
+            ws_handler = _WebUILogHandler(self._web_server)
+            ws_handler.setLevel(logging.INFO)
+            ws_handler.setFormatter(logging.Formatter(
+                "%(asctime)s │ %(name)-20s │ %(levelname)-5s │ %(message)s",
+                datefmt="%H:%M:%S",
+            ))
+            logging.getLogger().addHandler(ws_handler)
+
         try:
             logger.info("🎤 MIA Discord-only – iniciando bot...")
+
+            # Start WebUI server first (non-blocking)
+            if self._web_server:
+                await self._web_server.start()
+
+            # Start Discord bot (blocking)
             await self._discord_bot.start(self._discord_token)
         except Exception as exc:
             logger.error(
@@ -195,6 +255,12 @@ class MIAPipeline:
         logger.info("Apagando MIA...")
         self._running = False
 
+        if self._web_server:
+            try:
+                await self._web_server.stop()
+            except Exception:
+                pass
+
         if self._discord_bot:
             try:
                 await self._discord_bot.close()
@@ -203,3 +269,4 @@ class MIAPipeline:
 
         self._executor.shutdown(wait=False)
         logger.info("MIA apagada correctamente ✓")
+

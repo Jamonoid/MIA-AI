@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIA – Control Panel</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <span class="logo-icon">🎤</span>
+                    <span class="logo-text">MIA</span>
+                </div>
+                <div class="status-badge" id="statusBadge">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="stat-pill" id="statSpeakers" title="Speakers in VC">
+                    <span class="stat-icon">👤</span>
+                    <span class="stat-value">0</span>
+                </div>
+                <div class="stat-pill" id="statHistory" title="Chat messages">
+                    <span class="stat-icon">💬</span>
+                    <span class="stat-value">0</span>
+                </div>
+                <div class="stat-pill" id="statRag" title="RAG documents">
+                    <span class="stat-icon">🧠</span>
+                    <span class="stat-value">0</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main content -->
+        <div class="main">
+            <!-- Chat panel -->
+            <div class="chat-panel">
+                <!-- Tab bar -->
+                <div class="tab-bar">
+                    <button class="tab active" id="tabChat" data-tab="chat">💬 Chat</button>
+                    <button class="tab" id="tabTerminal" data-tab="terminal">🖥️ Terminal</button>
+                </div>
+
+                <div class="chat-messages" id="chatMessages">
+                    <div class="chat-empty">
+                        <span class="chat-empty-icon">🎙️</span>
+                        <p>Esperando conversación...</p>
+                    </div>
+                </div>
+
+                <div class="terminal-panel" id="terminalPanel" style="display:none">
+                    <div class="terminal-output" id="terminalOutput"></div>
+                </div>
+            </div>
+
+            <!-- Controls sidebar -->
+            <aside class="controls-panel">
+                <h2 class="controls-title">Controles</h2>
+
+                <!-- Toggle: Pause -->
+                <div class="control-group">
+                    <div class="control-row">
+                        <div class="control-info">
+                            <span class="control-icon">🔇</span>
+                            <span class="control-label">Pausar escucha</span>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="togglePause">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="control-desc">Detiene la recepción de audio</p>
+                </div>
+
+                <!-- Toggle: Proactive -->
+                <div class="control-group">
+                    <div class="control-row">
+                        <div class="control-info">
+                            <span class="control-icon">🔄</span>
+                            <span class="control-label">Modo continuo</span>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="toggleProactive">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="control-desc">MIA habla sola después de un silencio</p>
+                </div>
+
+                <!-- Slider: Idle seconds -->
+                <div class="control-group" id="idleGroup">
+                    <div class="control-row">
+                        <div class="control-info">
+                            <span class="control-icon">⏱️</span>
+                            <span class="control-label">Idle timer</span>
+                        </div>
+                        <span class="control-value" id="idleValue">30s</span>
+                    </div>
+                    <input type="range" class="slider" id="sliderIdle" min="10" max="120" value="30" step="5">
+                    <p class="control-desc">Segundos antes de habla proactiva</p>
+                </div>
+
+                <!-- Toggle: Text responses -->
+                <div class="control-group">
+                    <div class="control-row">
+                        <div class="control-info">
+                            <span class="control-icon">💬</span>
+                            <span class="control-label">Respuestas texto</span>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="toggleText">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="control-desc">Responder mensajes de texto en canales</p>
+                </div>
+
+                <!-- Toggle: RAG -->
+                <div class="control-group">
+                    <div class="control-row">
+                        <div class="control-info">
+                            <span class="control-icon">🧠</span>
+                            <span class="control-label">RAG Memory</span>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="toggleRag" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <p class="control-desc">Búsqueda de memoria contextual</p>
+                </div>
+
+                <!-- Slider: Silence threshold -->
+                <div class="control-group">
+                    <div class="control-row">
+                        <div class="control-info">
+                            <span class="control-icon">⏳</span>
+                            <span class="control-label">Silence threshold</span>
+                        </div>
+                        <span class="control-value" id="silenceValue">1500ms</span>
+                    </div>
+                    <input type="range" class="slider" id="sliderSilence" min="500" max="5000" value="1500" step="100">
+                    <p class="control-desc">ms de silencio grupal para trigger</p>
+                </div>
+
+                <!-- Slider: Min Energy RMS -->
+                <div class="control-group">
+                    <div class="control-row">
+                        <div class="control-info">
+                            <span class="control-icon">🔊</span>
+                            <span class="control-label">Min Energy RMS</span>
+                        </div>
+                        <span class="control-value" id="energyValue">0.010</span>
+                    </div>
+                    <input type="range" class="slider" id="sliderEnergy" min="0.001" max="0.05" value="0.01"
+                        step="0.001">
+                    <p class="control-desc">Umbral mínimo de energía para STT</p>
+                </div>
+
+                <!-- Audio level meter -->
+                <div class="control-group">
+                    <label class="control-label">📊 Nivel de audio</label>
+                    <div class="audio-meter" id="audioMeter">
+                        <div class="audio-meter-fill" id="audioMeterFill"></div>
+                    </div>
+                    <p class="control-desc">RMS del micrófono en tiempo real</p>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="control-group control-buttons">
+                    <button class="btn btn-primary" id="btnForceSpeak">
+                        🎙️ Habla ahora
+                    </button>
+                    <button class="btn btn-secondary" id="btnReconnect">
+                        🔄 Reconectar voz
+                    </button>
+                </div>
+
+                <!-- Button: Clear history -->
+                <div class="control-group">
+                    <button class="btn btn-danger" id="btnClearHistory">
+                        🗑️ Limpiar historial
+                    </button>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -52,6 +52,7 @@ class ContinuousVoiceSink(Sink):
         group_silence_ms: int = 1500,
         energy_threshold: float = 0.008,
         on_group_silence: GroupSilenceCallback | None = None,
+        on_audio_level: Callable[[float], None] | None = None,
         sample_rate: int = 48000,  # Discord native rate
         target_rate: int = 16000,  # STT rate
         **kwargs: Any,
@@ -63,9 +64,11 @@ class ContinuousVoiceSink(Sink):
         self.group_silence_ms = group_silence_ms
         self._energy_threshold = energy_threshold
         self._on_group_silence = on_group_silence
+        self._on_audio_level = on_audio_level
         self._sample_rate = sample_rate
         self._target_rate = target_rate
         self._bot_user_id: int | None = None  # Filtrar audio del bot
+        self._last_level_emit: float = 0.0  # Throttle level events
 
         # Per-user accumulated audio (PCM int16 bytes)
         self._user_buffers: dict[int, bytearray] = {}
@@ -115,6 +118,16 @@ class ContinuousVoiceSink(Sink):
                 return
 
             rms = float(np.sqrt(np.mean(samples ** 2)))
+
+            # Emit audio level every ~200ms
+            if self._on_audio_level:
+                now_lvl = time.monotonic()
+                if now_lvl - self._last_level_emit >= 0.2:
+                    self._last_level_emit = now_lvl
+                    try:
+                        self._on_audio_level(rms)
+                    except Exception:
+                        pass
 
             if rms >= self._energy_threshold:
                 now = time.monotonic()
@@ -256,6 +269,7 @@ class GroupVoiceSink:
         sample_rate: int = 16000,
         energy_threshold: float = 0.008,
         on_group_silence: GroupSilenceCallback | None = None,
+        on_audio_level: Callable[[float], None] | None = None,
         bot_user_id: int | None = None,
     ) -> None:
         self._vc = voice_client
@@ -263,6 +277,7 @@ class GroupVoiceSink:
         self._group_silence_ms = group_silence_ms
         self._energy_threshold = energy_threshold
         self._on_group_silence = on_group_silence
+        self._on_audio_level = on_audio_level
         self._bot_user_id = bot_user_id
         self._running = False
 
@@ -279,6 +294,7 @@ class GroupVoiceSink:
             group_silence_ms=self._group_silence_ms,
             energy_threshold=self._energy_threshold,
             on_group_silence=self._on_group_silence,
+            on_audio_level=self._on_audio_level,
         )
         self._sink._bot_user_id = self._bot_user_id
 

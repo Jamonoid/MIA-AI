@@ -53,6 +53,12 @@ class STTConfig:
     language: str = "es"
     device: str = "auto"  # "cpu", "cuda", "auto"
     compute_type: str = "int8"
+    stt_hallucinations: list[str] = field(default_factory=lambda: [
+        "gracias", "gracias por ver", "subtítulos por",
+        "subtitulos por", "suscríbete", "suscribete",
+        "thanks", "thank you", "thanks for watching",
+        "you", "bye", "adiós", "adios",
+    ])
 
 
 @dataclass
@@ -86,6 +92,13 @@ class DiscordConfig:
 
 
 @dataclass
+class WebUIConfig:
+    enabled: bool = True
+    port: int = 8080
+
+
+
+@dataclass
 class MIAConfig:
     """Configuración raíz de MIA (Discord-only)."""
 
@@ -95,6 +108,7 @@ class MIAConfig:
     tts: TTSConfig = field(default_factory=TTSConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
+    webui: WebUIConfig = field(default_factory=WebUIConfig)
 
 
 # ──────────────────────────────────────────────
@@ -134,6 +148,8 @@ def load_config(path: Path | str | None = None) -> MIAConfig:
         tts=_dict_to_dataclass(TTSConfig, models.get("tts", {})),
         rag=_dict_to_dataclass(RAGConfig, raw.get("rag", {})),
         discord=_dict_to_dataclass(DiscordConfig, raw.get("discord", {})),
+        webui=_dict_to_dataclass(WebUIConfig, raw.get("webui", {})),
     )
 
     return cfg
+
