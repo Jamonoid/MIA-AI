@@ -246,30 +246,52 @@ class MIAPipeline:
         #  así que debe crearse dentro de asyncio.run() para tener el loop correcto)
         discord_task = None
         if hasattr(self, '_discord_token') and self._discord_token:
-            from .discord_bot import MIADiscordBot
+            logger.info("Discord: token encontrado (%d chars), creando bot...", len(self._discord_token))
+            try:
+                from .discord_bot import MIADiscordBot
 
-            self._discord_bot = MIADiscordBot(
-                conversation_handler=self._conversation_handler,
-                stt=self._stt,
-                tts=self._tts,
-                llm=self._llm,
-                rag=self._rag,
-                audio_player=self._audio_player,
-                lipsync=self._lipsync,
-                osc=self._vts,
-                ws_server=self._ws,
-                executor=self._executor,
-                chat_history=self._chat_history,
-                config=self.config,
-            )
-            # Re-register audio mode callback now that bot exists
-            self._ws._on_audio_mode_change = self.set_audio_mode
-            logger.info("Discord bot inicializado ✓")
+                self._discord_bot = MIADiscordBot(
+                    conversation_handler=self._conversation_handler,
+                    stt=self._stt,
+                    tts=self._tts,
+                    llm=self._llm,
+                    rag=self._rag,
+                    audio_player=self._audio_player,
+                    lipsync=self._lipsync,
+                    osc=self._vts,
+                    ws_server=self._ws,
+                    executor=self._executor,
+                    chat_history=self._chat_history,
+                    config=self.config,
+                )
+                # Re-register audio mode callback now that bot exists
+                self._ws._on_audio_mode_change = self.set_audio_mode
+                logger.info("Discord bot inicializado ✓")
 
-            discord_task = asyncio.create_task(
-                self._discord_bot.start(self._discord_token)
-            )
-            logger.info("Discord bot iniciando...")
+                async def _discord_runner() -> None:
+                    """Wrapper que captura errores del bot de Discord."""
+                    try:
+                        await self._discord_bot.start(self._discord_token)
+                    except Exception as exc:
+                        logger.error(
+                            "═══ DISCORD BOT ERROR ═══\n"
+                            "  Tipo: %s\n"
+                            "  Detalle: %s\n"
+                            "  ¿Token válido? Verifica DISCORD_BOT_TOKEN en .env\n"
+                            "  ¿py-cord instalado? uv pip install 'py-cord[voice]>=2.6.0'",
+                            type(exc).__name__, exc,
+                        )
+
+                discord_task = asyncio.create_task(_discord_runner())
+                logger.info("Discord bot iniciando...")
+            except ImportError as exc:
+                logger.error(
+                    "Discord: no se pudo importar discord_bot: %s. "
+                    "¿Instalaste py-cord? uv pip install 'py-cord[voice]>=2.6.0'",
+                    exc,
+                )
+            except Exception as exc:
+                logger.error("Discord: error creando bot: %s", exc, exc_info=True)
 
         logger.info("🎤 MIA escuchando... (Ctrl+C para detener)")
 

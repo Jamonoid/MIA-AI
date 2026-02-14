@@ -14,7 +14,7 @@ models:
     # LM Studio / OpenRouter (solo si backend: "lmstudio" o "openrouter")
     base_url: "https://openrouter.ai/api/v1"  # OpenRouter base (client agrega /chat/completions)
     model_name: "deepseek/deepseek-v3.2"
-    api_key: "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"                    # Solo OpenRouter (o env OPENROUTER_API_KEY)
+    api_key: "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"                    # Solo OpenRouter (o env OPENROUTER_API_KEY)
   stt:
     model_size: "large-v3-turbo"
     language: "es"

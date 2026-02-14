@@ -27,14 +27,34 @@ def setup_logging(level: str = "INFO") -> None:
 def main() -> None:
     """Punto de entrada principal."""
     # Cargar variables de entorno (.env)
+    dotenv_loaded = False
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        dotenv_loaded = load_dotenv()
     except ImportError:
-        pass  # python-dotenv no instalado, variables se leen del entorno
+        pass  # python-dotenv no instalado
 
     setup_logging("INFO")
     logger = logging.getLogger("mia")
+
+    # Log dotenv status
+    if dotenv_loaded:
+        logger.info(".env cargado ✓")
+    else:
+        logger.warning(
+            ".env no encontrado o vacío. "
+            "Si usas Discord, crea .env con DISCORD_BOT_TOKEN=tu_token"
+        )
+
+    # Log Discord token status
+    import os
+    discord_token = os.getenv("DISCORD_BOT_TOKEN", "")
+    if discord_token:
+        logger.info(
+            "DISCORD_BOT_TOKEN detectado (%d chars)", len(discord_token)
+        )
+    else:
+        logger.info("DISCORD_BOT_TOKEN no presente en entorno")
 
     logger.info("╔══════════════════════════════════════╗")
     logger.info("║             MIA – AI                 ║")

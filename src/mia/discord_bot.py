@@ -879,7 +879,12 @@ class MIADiscordBot:
 
     async def start(self, token: str) -> None:
         """Inicia el bot de Discord."""
-        logger.info("Discord bot starting...")
+        logger.info(
+            "Discord bot starting... (token: %s...%s, %d chars)",
+            token[:4] if len(token) > 8 else "????",
+            token[-4:] if len(token) > 8 else "????",
+            len(token),
+        )
         # Py-cord's Bot.__init__ stores asyncio.get_event_loop() which may
         # differ from the loop running inside asyncio.run(). We must update
         # the loop reference (same as __aenter__ does) so VoiceClient,
@@ -888,7 +893,9 @@ class MIADiscordBot:
         self.bot.loop = loop
         self.bot.http.loop = loop
         self.bot._connection.loop = loop
+        logger.info("Discord: llamando bot.start()...")
         await self.bot.start(token)
+        logger.info("Discord: bot.start() retornó (no debería pasar normalmente)")
 
     async def close(self) -> None:
         """Cierra el bot limpiamente."""
