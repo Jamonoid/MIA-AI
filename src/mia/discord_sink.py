@@ -65,6 +65,7 @@ class ContinuousVoiceSink(Sink):
         self._on_group_silence = on_group_silence
         self._sample_rate = sample_rate
         self._target_rate = target_rate
+        self._bot_user_id: int | None = None  # Filtrar audio del bot
 
         # Per-user accumulated audio (PCM int16 bytes)
         self._user_buffers: dict[int, bytearray] = {}
@@ -85,9 +86,17 @@ class ContinuousVoiceSink(Sink):
         self._monitor_task = self._loop.create_task(self._silence_monitor())
         logger.info("ContinuousVoiceSink: started (monitoring for silence)")
 
+    def format_audio(self, audio: Any) -> None:
+        """No-op: py-cord llama esto en cleanup, pero nosotros manejamos el audio."""
+        pass
+
     @Filters.container
     def write(self, data: bytes, user: int) -> None:
         """Called from recv_audio thread with decoded PCM int16 stereo 48kHz."""
+        # Ignorar audio del bot mismo
+        if self._bot_user_id and user == self._bot_user_id:
+            return
+
         # Also call parent write to maintain audio_data for cleanup
         if user not in self.audio_data:
             import io
@@ -114,7 +123,16 @@ class ContinuousVoiceSink(Sink):
 
                 # Resolve username
                 if user not in self._user_names and self.vc:
-                    member = self.vc.guild.get_member(user)
+                    member = None
+                    # Primero buscar en el voice channel (siempre tiene los miembros actualizados)
+                    if self.vc.channel:
+                        for m in self.vc.channel.members:
+                            if m.id == user:
+                                member = m
+                                break
+                    # Fallback al guild cache
+                    if not member:
+                        member = self.vc.guild.get_member(user)
                     name = member.display_name if member else f"User_{user}"
                     self._user_names[user] = name
 
@@ -238,12 +256,14 @@ class GroupVoiceSink:
         sample_rate: int = 16000,
         energy_threshold: float = 0.008,
         on_group_silence: GroupSilenceCallback | None = None,
+        bot_user_id: int | None = None,
     ) -> None:
         self._vc = voice_client
         self._sink: ContinuousVoiceSink | None = None
         self._group_silence_ms = group_silence_ms
         self._energy_threshold = energy_threshold
         self._on_group_silence = on_group_silence
+        self._bot_user_id = bot_user_id
         self._running = False
 
     async def start(self) -> None:
@@ -260,6 +280,7 @@ class GroupVoiceSink:
             energy_threshold=self._energy_threshold,
             on_group_silence=self._on_group_silence,
         )
+        self._sink._bot_user_id = self._bot_user_id
 
         # Dummy async callback (py-cord requires it)
         async def _on_stop(sink: ContinuousVoiceSink, *args: Any) -> None:

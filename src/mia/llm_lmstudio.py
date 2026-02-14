@@ -28,7 +28,7 @@ class LMStudioLLM:
     """Generador de texto usando LM Studio (API OpenAI-compatible)."""
 
     def __init__(self, config: LLMConfig, prompt_config: PromptConfig) -> None:
-        self.base_url = config.base_url
+        self.base_url = config.base_url or "http://localhost:1234/v1"
         self.model = config.model_name
         self.max_tokens = config.max_tokens
         self.temperature = config.temperature

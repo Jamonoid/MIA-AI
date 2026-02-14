@@ -1,23 +1,19 @@
 [project]
 name = "mia"
-version = "0.1.0"
-description = "MIA – VTuber assistant with minimal latency"
+version = "0.2.0"
+description = "MIA – Discord bot with AI voice and text"
 readme = "README.md"
 requires-python = ">=3.11"
 
 dependencies = [
     "pyyaml",
-    "sounddevice",
     "numpy",
-    "python-osc",
-    "websockets",
     "openai",
     "chromadb",
     "sentence-transformers",
-    "edge-tts",                # Microsoft Edge TTS (no requiere GPU)
-    "aiohttp",                 # HTTP server para WebUI
-    "py-cord[voice]>=2.6.0",   # Discord bot con soporte de voz
-    "python-dotenv>=1.0.0",    # Carga de .env (token Discord, etc.)
+    "edge-tts",
+    "py-cord[voice]>=2.6.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -28,11 +24,8 @@ dev = [
 # ══════════════════════════════════════════════════════════════
 # ML dependencies -- DO NOT add to [dependencies] or extras.
 # These require manual installation:
-#   1. uv pip install faster-whisper
-#   2. (optional) uv pip install llama-cpp-python
-#
-# faster-whisper usa CTranslate2 (no depende de PyTorch).
-# No es necesario instalar torch/torchaudio manualmente.
+#   1. pip install faster-whisper
+#   2. (optional) pip install llama-cpp-python
 # ══════════════════════════════════════════════════════════════
 
 [project.scripts]
@@ -47,4 +40,3 @@ packages = ["src/mia"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-

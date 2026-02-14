@@ -1,11 +1,10 @@
 """
-discord_bot.py – Bot de Discord para MIA.
+discord_bot.py – Bot de Discord para MIA (Discord-only).
 
 Gestiona la conexión a Discord, voice channels, y la interacción
-con el pipeline de conversación de MIA. Soporta:
+con MIA. Soporta:
 - Slash commands: /join, /leave, /mia, /mute, /move, /nick, /sound
 - Voice receive con detección de silencio grupal
-- Dual audio output (Discord + local)
 - Text channel responses (cuando la mencionan)
 """
 
@@ -16,6 +15,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -36,47 +36,36 @@ from .discord_sink import GroupVoiceSink, SpeakerData
 
 logger = logging.getLogger(__name__)
 
+_EMOTION_RE = re.compile(r"\[\w+\]\s*")
+_NAME_PREFIX_RE = re.compile(r"^\s*(?:MIA|Mia|mia)\s*:\s*")
+
 
 class MIADiscordBot:
-    """Bot de Discord para MIA con soporte de voz y texto.
+    """Bot de Discord para MIA (Discord-only).
 
     Features:
-    - /join: Unirse al voice channel del usuario
-    - /leave: Salir del voice channel
+    - /join, /leave: Voice channel management
     - /mia <texto>: Enviar texto a MIA
-    - /mute, /unmute: Mutear/desmutear a alguien (server mute)
-    - /move: Mover a alguien a otro voice channel
-    - /nick: Cambiar apodo de alguien
-    - Responde automáticamente cuando la mencionan en text channels
+    - /mute, /unmute, /move, /nick, /sound: Moderation
+    - Responde cuando la mencionan en text channels
     - Voice receive con detección de silencio grupal
-    - Dual audio output (Discord + speakers locales para lipsync)
     """
 
     def __init__(
         self,
         *,
-        conversation_handler: Any,
         stt: Any,
         tts: Any,
         llm: Any,
         rag: Any = None,
-        audio_player: Any = None,
-        lipsync: Any = None,
-        osc: Any = None,  # VTubeStudioClient (legacy param name)
-        ws_server: Any = None,
         executor: ThreadPoolExecutor,
         chat_history: list[dict[str, str]],
         config: Any,
     ) -> None:
-        self._conversation_handler = conversation_handler
         self._stt = stt
         self._tts = tts
         self._llm = llm
         self._rag = rag
-        self._audio_player = audio_player
-        self._lipsync = lipsync
-        self._osc = osc
-        self._ws_server = ws_server
         self._executor = executor
         self._chat_history = chat_history
         self._config = config
@@ -85,7 +74,7 @@ class MIADiscordBot:
         self._voice_client: Optional[discord.VoiceClient] = None
         self._text_responses_enabled = config.discord.text_channel_responses
         self._processing = False  # Guard para evitar respuestas simultáneas
-        self._voice_receive_enabled = False  # Controlado por audio mode toggle
+        self._voice_receive_enabled = True  # Siempre activo en Discord-only
 
         # Configurar intents
         intents = discord.Intents.default()
@@ -101,6 +90,17 @@ class MIADiscordBot:
 
         self._setup_events()
         self._setup_commands()
+
+    # ──────────────────────────────────────────
+    # Utilidades
+    # ──────────────────────────────────────────
+
+    @staticmethod
+    def _strip_emotion_tags(text: str) -> str:
+        """Elimina tags de emoción [tag] y prefijo 'MIA:' del texto."""
+        text = _EMOTION_RE.sub("", text).strip()
+        text = _NAME_PREFIX_RE.sub("", text).strip()
+        return text
 
     # ──────────────────────────────────────────
     # Events
@@ -581,8 +581,8 @@ class MIADiscordBot:
         self._voice_sink = GroupVoiceSink(
             voice_client=self._voice_client,
             group_silence_ms=self._config.discord.group_silence_ms,
-            energy_threshold=self._config.vad.energy_threshold,
             on_group_silence=self._on_group_silence,
+            bot_user_id=self.bot.user.id if self.bot.user else None,
         )
         await self._voice_sink.start()
         logger.info("Discord: voice receive activado")
@@ -610,6 +610,9 @@ class MIADiscordBot:
 
         self._processing = True
         try:
+            # Dejar de escuchar mientras procesamos
+            await self._stop_voice_receive()
+
             # STT per speaker
             loop = asyncio.get_event_loop()
             speaker_texts: list[tuple[str, str]] = []  # (name, text)
@@ -618,7 +621,12 @@ class MIADiscordBot:
                 name = speaker_data["name"]
                 audio = speaker_data["audio"]
 
-                if len(audio) < 1600:  # < 100ms a 16kHz
+                # Filtrar usuarios fantasma (IDs que Discord no puede resolver)
+                if name.startswith("User_"):
+                    logger.debug("Discord: ignorando speaker fantasma %s", name)
+                    continue
+
+                if len(audio) < 8000:  # < 500ms a 16kHz — evita alucinaciones de Whisper
                     continue
 
                 text = await loop.run_in_executor(
@@ -657,6 +665,9 @@ class MIADiscordBot:
             logger.exception("Discord: error procesando group silence")
         finally:
             self._processing = False
+            # Reanudar escucha después de todo el pipeline
+            if self._voice_client and self._voice_client.is_connected():
+                await self._start_voice_receive()
 
     # ──────────────────────────────────────────
     # Response generation + dual audio
@@ -685,11 +696,14 @@ class MIADiscordBot:
 
         response = await loop.run_in_executor(self._executor, _generate)
 
+        # Strip emotion tags
+        clean_response = self._strip_emotion_tags(response)
+
         # Guardar en historial
-        if response.strip():
+        if clean_response.strip():
             self._chat_history.append({"role": "user", "content": user_text})
             self._chat_history.append(
-                {"role": "assistant", "content": response}
+                {"role": "assistant", "content": clean_response}
             )
             if len(self._chat_history) > 20:
                 self._chat_history[:] = self._chat_history[-12:]
@@ -700,16 +714,16 @@ class MIADiscordBot:
                     self._executor,
                     self._rag.ingest,
                     user_text,
-                    response,
+                    clean_response,
                 )
 
-        return response
+        return clean_response
 
     async def _generate_and_speak(self, user_text: str) -> str:
-        """Genera respuesta y reproduce en Discord + local.
+        """Genera respuesta y reproduce en Discord.
 
         Returns:
-            Texto completo de la respuesta.
+            Texto limpio de la respuesta (sin emotion tags).
         """
         loop = asyncio.get_event_loop()
 
@@ -730,24 +744,28 @@ class MIADiscordBot:
                 )
             )
 
-        full_response = await loop.run_in_executor(self._executor, _generate)
+        raw_response = await loop.run_in_executor(self._executor, _generate)
 
-        if not full_response.strip():
-            return full_response
+        # Strip emotion tags antes de TTS
+        clean_response = self._strip_emotion_tags(raw_response)
+        logger.info("🤖 MIA: %s", clean_response[:80])
+
+        if not clean_response.strip():
+            return clean_response
 
         # TTS
         def _synthesize() -> np.ndarray:
-            return self._tts.synthesize(full_response)
+            return self._tts.synthesize(clean_response)
 
         audio_data = await loop.run_in_executor(self._executor, _synthesize)
 
         if audio_data is not None and len(audio_data) > 0:
-            await self._play_dual_audio(audio_data)
+            await self._play_in_discord(audio_data)
 
         # Historial
         self._chat_history.append({"role": "user", "content": user_text})
         self._chat_history.append(
-            {"role": "assistant", "content": full_response}
+            {"role": "assistant", "content": clean_response}
         )
         if len(self._chat_history) > 20:
             self._chat_history[:] = self._chat_history[-12:]
@@ -758,55 +776,19 @@ class MIADiscordBot:
                 self._executor,
                 self._rag.ingest,
                 user_text,
-                full_response,
+                clean_response,
             )
 
-        # Subtítulos al WebUI
-        if self._ws_server:
-            await self._ws_server.send_subtitle(user_text, role="user")
-            await self._ws_server.send_subtitle(
-                full_response, role="assistant"
-            )
+        return clean_response
 
-        return full_response
-
-    async def _play_dual_audio(self, audio: np.ndarray) -> None:
-        """Reproduce audio en Discord + localmente."""
-
-        # 1. Audio local (lipsync + speakers)
-        if self._config.discord.dual_audio:
-            if self._lipsync and self._osc:
-                try:
-                    sr = getattr(self._tts, "sample_rate", 24000)
-                    chunk_samples = int(sr * 0.02)  # 20ms chunks
-                    for i in range(0, len(audio), chunk_samples):
-                        chunk = audio[i : i + chunk_samples]
-                        val = self._lipsync.process(chunk)
-                        self._osc.send_mouth(val)
-                        await asyncio.sleep(0.001)
-                    self._osc.send_mouth(0.0)
-                except Exception as e:
-                    logger.debug("Lipsync error: %s", e)
-
-            # Only play locally if NOT in Discord-only mode
-            # (voice_receive_enabled means audio mode is 'discord')
-            if self._audio_player and not self._voice_receive_enabled:
-                try:
-                    self._audio_player.enqueue(audio)
-                except Exception as e:
-                    logger.debug("Local playback error: %s", e)
-
-        # 2. Audio en Discord
+    async def _play_discord_audio(self, audio: np.ndarray) -> None:
+        """Reproduce audio en Discord."""
         if self._voice_client and self._voice_client.is_connected():
             await self._play_in_discord(audio)
 
     async def _play_in_discord(self, audio: np.ndarray) -> None:
         """Reproduce audio en el voice channel vía FFmpeg."""
         try:
-            # Pausar voice receive mientras habla
-            if self._voice_sink:
-                await self._voice_sink.stop()
-
             # Convertir a WAV temporal
             sr = getattr(self._tts, "sample_rate", 24000)
             wav_path = await self._numpy_to_temp_wav(audio, sr)
@@ -833,17 +815,8 @@ class MIADiscordBot:
                 except asyncio.TimeoutError:
                     logger.warning("Discord: playback timeout")
 
-            # Reanudar voice receive
-            if self._voice_client and self._voice_client.is_connected():
-                await self._start_voice_receive()
-
         except Exception:
             logger.exception("Discord: error playing audio")
-            if self._voice_client and self._voice_client.is_connected():
-                try:
-                    await self._start_voice_receive()
-                except Exception:
-                    pass
 
     @staticmethod
     async def _numpy_to_temp_wav(

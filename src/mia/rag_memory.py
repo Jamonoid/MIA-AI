@@ -24,16 +24,27 @@ logger = logging.getLogger(__name__)
 class RAGMemory:
     """Memoria conversacional basada en ChromaDB + sentence-transformers."""
 
-    def __init__(self, config: dict[str, Any]) -> None:
-        rag_cfg = config.get("rag", {})
-        self.enabled: bool = rag_cfg.get("enabled", False)
-        self.top_k: int = rag_cfg.get("top_k", 3)
-        self.max_docs: int = rag_cfg.get("max_docs", 5000)
-        self.score_threshold: float = rag_cfg.get("score_threshold", 0.3)
-        self._persist_dir: str = rag_cfg.get("persist_dir", "./data/chroma_db")
-        self._embedding_model_name: str = rag_cfg.get(
-            "embedding_model", "all-MiniLM-L6-v2"
-        )
+    def __init__(self, config: Any) -> None:
+        # Accept either a RAGConfig dataclass or a raw dict
+        if hasattr(config, "enabled"):
+            # Typed RAGConfig dataclass
+            self.enabled = config.enabled
+            self.top_k = config.top_k
+            self.max_docs = config.max_docs
+            self.score_threshold = config.score_threshold
+            self._persist_dir = config.persist_dir
+            self._embedding_model_name = config.embedding_model
+        else:
+            # Legacy raw dict
+            rag_cfg = config.get("rag", {})
+            self.enabled = rag_cfg.get("enabled", False)
+            self.top_k = rag_cfg.get("top_k", 3)
+            self.max_docs = rag_cfg.get("max_docs", 5000)
+            self.score_threshold = rag_cfg.get("score_threshold", 0.3)
+            self._persist_dir = rag_cfg.get("persist_dir", "./data/chroma_db")
+            self._embedding_model_name = rag_cfg.get(
+                "embedding_model", "all-MiniLM-L6-v2"
+            )
 
         self._client = None
         self._collection = None

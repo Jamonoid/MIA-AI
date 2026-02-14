@@ -1,13 +1,14 @@
 """
-main.py – Punto de entrada de MIA.
+main.py – Punto de entrada de MIA (Discord-only).
 
-Carga configuración, inicializa pipeline y ejecuta el loop principal.
+Carga configuración, inicializa pipeline y ejecuta el bot de Discord.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -27,38 +28,27 @@ def setup_logging(level: str = "INFO") -> None:
 def main() -> None:
     """Punto de entrada principal."""
     # Cargar variables de entorno (.env)
-    dotenv_loaded = False
     try:
         from dotenv import load_dotenv
-        dotenv_loaded = load_dotenv()
+        load_dotenv()
     except ImportError:
-        pass  # python-dotenv no instalado
+        pass
 
     setup_logging("INFO")
     logger = logging.getLogger("mia")
 
-    # Log dotenv status
-    if dotenv_loaded:
-        logger.info(".env cargado ✓")
-    else:
-        logger.warning(
-            ".env no encontrado o vacío. "
-            "Si usas Discord, crea .env con DISCORD_BOT_TOKEN=tu_token"
+    # Verificar token de Discord
+    token = os.getenv("DISCORD_BOT_TOKEN", "")
+    if not token:
+        logger.error(
+            "DISCORD_BOT_TOKEN no encontrado. "
+            "Crea un archivo .env con DISCORD_BOT_TOKEN=tu_token"
         )
-
-    # Log Discord token status
-    import os
-    discord_token = os.getenv("DISCORD_BOT_TOKEN", "")
-    if discord_token:
-        logger.info(
-            "DISCORD_BOT_TOKEN detectado (%d chars)", len(discord_token)
-        )
-    else:
-        logger.info("DISCORD_BOT_TOKEN no presente en entorno")
+        sys.exit(1)
 
     logger.info("╔══════════════════════════════════════╗")
-    logger.info("║             MIA – AI                 ║")
-    logger.info("║              v0.1.0                  ║")
+    logger.info("║         MIA – Discord Bot            ║")
+    logger.info("║              v0.2.0                  ║")
     logger.info("╚══════════════════════════════════════╝")
 
     # Cargar config
@@ -80,11 +70,7 @@ def main() -> None:
     try:
         pipeline.load()
     except Exception as exc:
-        logger.error("Error cargando módulos: %s", exc)
-        logger.error(
-            "Verifica que los modelos están en las rutas correctas "
-            "según config.yaml"
-        )
+        logger.error("Error cargando módulos: %s", exc, exc_info=True)
         sys.exit(1)
 
     # Ejecutar

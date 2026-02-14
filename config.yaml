@@ -1,45 +1,38 @@
-prompt:
-  system: "Eres MIA, una asistente virtual inteligente y amigable. Respondes de forma concisa y natural en español."
-  dir: "./prompts/"                # Carpeta con archivos .md modulares (override system)
+# ══════════════════════════════════════════════
+# MIA – Discord Bot Config (Discord-only branch)
+# ══════════════════════════════════════════════
 
+# ── Prompt ──
+prompt:
+  system: "Eres MIA, una asistente virtual inteligente y amigable."
+  dir: "./prompts/"
+
+# ── Modelos ──
 models:
   llm:
-    backend: "openrouter"            # "llamacpp" | "lmstudio" | "openrouter"
-    path: "./models/llama-3-8b.gguf"
-    context_size: 2048
+    backend: "openrouter"
+    model_name: "google/gemini-2.5-flash-lite"
+    api_key: ""             # o env OPENROUTER_API_KEY
+    context_size: 4096
     max_tokens: 512
     temperature: 0.7
     top_p: 0.9
-    n_gpu_layers: -1
-    # LM Studio / OpenRouter (solo si backend: "lmstudio" o "openrouter")
-    base_url: "https://openrouter.ai/api/v1"  # OpenRouter base (client agrega /chat/completions)
-    model_name: "deepseek/deepseek-v3.2"
-    api_key: "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"                    # Solo OpenRouter (o env OPENROUTER_API_KEY)
+
   stt:
+    backend: "faster-whisper"
     model_size: "large-v3-turbo"
     language: "es"
-    device: "auto"
+    device: "cuda"
     compute_type: "int8"
+
   tts:
-    backend: "edge"              # Solo "edge" soportado
-    chunk_size: 150
-    language: "es"
-    # Edge TTS
+    backend: "edge"
     edge_voice: "es-CL-CatalinaNeural"
     edge_rate: "+5%"
-    edge_pitch: "+42Hz"
+    edge_pitch: "+45Hz"
+    chunk_size: 150
 
-audio:
-  sample_rate: 16000
-  channels: 1
-  chunk_ms: 20
-  playback_sample_rate: 24000
-
-vad:
-  energy_threshold: 0.01
-  silence_duration_ms: 800
-  min_speech_duration_ms: 300
-
+# ── RAG Memory ──
 rag:
   enabled: true
   embedding_model: "all-MiniLM-L6-v2"
@@ -48,40 +41,8 @@ rag:
   max_docs: 5000
   score_threshold: 0.3
 
-lipsync:
-  smoothing_alpha: 0.2
-  rms_min: 0.0
-  rms_max: 0.3
-
-vtube_studio:
-  enabled: true
-  ws_url: "ws://localhost:8001"
-  token_file: ".vts_token"
-  mouth_param: "MouthOpen"
-  eye_l_param: "EyeOpenLeft"
-  eye_r_param: "EyeOpenRight"
-  expressions:
-    neutral: "00_IdleFace.exp3.json"
-    happy: "01_HappyFace.exp3.json"
-    cry: "02_CryFace.exp3.json"
-    pout: "03_PoutFace.exp3.json"
-    angry: "04_AngryFace.exp3.json"
-    ashamed: "05_AshamedFace.exp3.json"
-    scared: "06_ScaredFace.exp3.json"
-    sad: "07_SadFace.exp3.json"
-    super_happy: "08_SuperHappyFace.exp3.json"
-
-websocket:
-  host: "127.0.0.1"
-  port: 8765
-  enabled: true
-
-performance:
-  vad_sensitivity: 0.5
-  lipsync_smoothing: 0.2
-
+# ── Discord ──
 discord:
   enabled: true
-  text_channel_responses: true    # Responder cuando mencionan a MIA en text
-  group_silence_ms: 1500          # Esperar 1.5s de silencio grupal
-  dual_audio: true                # Reproducir también en speakers locales
+  text_channel_responses: false
+  group_silence_ms: 1500
