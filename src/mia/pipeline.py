@@ -255,6 +255,22 @@ class MIAPipeline:
         logger.info("Apagando MIA...")
         self._running = False
 
+        # ── Guardar sesión de chat ──
+        if self._chat_history:
+            try:
+                from datetime import datetime
+                sessions_dir = Path("data/chat_sessions")
+                sessions_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                session_file = sessions_dir / f"session_{ts}.jsonl"
+                import json
+                with open(session_file, "w", encoding="utf-8") as f:
+                    for msg in self._chat_history:
+                        f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                logger.info("Sesión guardada: %s (%d mensajes)", session_file.name, len(self._chat_history))
+            except Exception:
+                logger.exception("Error guardando sesión de chat")
+
         if self._web_server:
             try:
                 await self._web_server.stop()

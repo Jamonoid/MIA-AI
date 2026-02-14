@@ -1052,15 +1052,6 @@ class MIADiscordBot:
             if len(self._chat_history) > 20:
                 self._chat_history[:] = self._chat_history[-12:]
 
-            # RAG ingest
-            if self._rag and self._config.rag.enabled:
-                await loop.run_in_executor(
-                    self._executor,
-                    self._rag.ingest,
-                    user_text,
-                    clean_response,
-                )
-
         return clean_response
 
     async def _generate_and_speak(self, user_text: str) -> str:
@@ -1112,15 +1103,6 @@ class MIADiscordBot:
         )
         if len(self._chat_history) > 20:
             self._chat_history[:] = self._chat_history[-12:]
-
-        # RAG ingest
-        if self._rag and self._config.rag.enabled:
-            await loop.run_in_executor(
-                self._executor,
-                self._rag.ingest,
-                user_text,
-                clean_response,
-            )
 
         return clean_response
 

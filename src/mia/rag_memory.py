@@ -190,3 +190,17 @@ class RAGMemory:
         ids_to_delete = [item[0] for item in id_ts[:excess]]
         self._collection.delete(ids=ids_to_delete)
         logger.info("RAG limpieza: eliminados %d documentos antiguos", excess)
+
+    def clear(self) -> int:
+        """Borra toda la memoria vectorizada. Retorna docs eliminados."""
+        if not self._client or not self._collection:
+            return 0
+
+        count = self._collection.count()
+        self._client.delete_collection("mia_memory")
+        self._collection = self._client.get_or_create_collection(
+            name="mia_memory",
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.info("RAG: %d documentos eliminados", count)
+        return count
