@@ -5,7 +5,7 @@ Bot de Discord con inteligencia artificial que escucha, piensa y habla. Se une a
 ## Features
 
 - **Voz en Discord** — Escucha y habla en voice channels usando STT + TTS
-- **LLM configurable** — OpenRouter, LM Studio, o llama.cpp local
+- **LLM configurable** — OpenAI Compatible API, LM Studio, o llama.cpp local
 - **Memoria RAG** — Recuerda conversaciones usando ChromaDB con vectorización curada por LLM
 - **Prompts modulares** — Personalidad definida en archivos `.md`
 - **Baja latencia** — faster-whisper (CTranslate2) + Edge TTS
@@ -47,7 +47,7 @@ Crea un archivo `.env` en la raíz del proyecto:
 
 ```env
 DISCORD_BOT_TOKEN=tu_token_aquí
-OPENROUTER_API_KEY=tu_api_key  # Solo si usas OpenRouter
+OPENROUTER_API_KEY=tu_api_key 
 ```
 
 ### 2. Config
