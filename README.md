@@ -23,7 +23,7 @@ Bot de Discord con inteligencia artificial que escucha, piensa y habla. Se une a
 
 ```bash
 # Clonar
-git clone https://github.com/tu-usuario/MIA-AI.git
+git clone https://github.com/Jamonoid/MIA-AI.git
 cd MIA-AI
 
 # Entorno virtual
