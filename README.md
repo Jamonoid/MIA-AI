@@ -1,14 +1,17 @@
-# MIA – Bot de Discord con IA 🤖🎤
+# MIA – Bot de Discord con IA
 
 Bot de Discord con inteligencia artificial que escucha, piensa y habla. Se une a voice channels, escucha a los usuarios, y responde con voz sintetizada. También responde mensajes de texto.
 
 ## Features
 
-- 🎤 **Voz en Discord** — Escucha y habla en voice channels usando STT + TTS
-- 🧠 **LLM configurable** — OpenRouter, LM Studio, o llama.cpp local
-- 💾 **Memoria RAG** — Recuerda conversaciones usando ChromaDB
-- 📝 **Prompts modulares** — Personalidad definida en archivos `.md`
-- ⚡ **Baja latencia** — faster-whisper (CTranslate2) + Edge TTS
+- **Voz en Discord** — Escucha y habla en voice channels usando STT + TTS
+- **LLM configurable** — OpenRouter, LM Studio, o llama.cpp local
+- **Memoria RAG** — Recuerda conversaciones usando ChromaDB con vectorización curada por LLM
+- **Prompts modulares** — Personalidad definida en archivos `.md`
+- **Baja latencia** — faster-whisper (CTranslate2) + Edge TTS
+- **Modo proactivo** — MIA habla espontáneamente después de silencio
+- **WebUI** — Panel de control en tiempo real con chat, terminal y visualización 3D de memoria
+- **Filtro TTS** — Limpia asteriscos, paréntesis y caracteres especiales antes de sintetizar voz
 
 ## Requisitos
 
@@ -64,6 +67,7 @@ Secciones principales:
 | `models.tts` | Voz de Edge TTS, velocidad, tono |
 | `rag` | Activar/desactivar memoria, embedding model |
 | `discord` | Tiempo de silencio grupal, respuestas en text channels |
+| `webui` | Puerto del panel de control (default: 8080) |
 
 ### 3. Prompts
 
@@ -74,14 +78,34 @@ prompts/
 ├── 01_identity.md    # Quién es MIA
 ├── 02_behavior.md    # Cómo responde
 ├── 04_memory.md      # Uso del contexto RAG
-└── 05_discord.md     # Comportamiento en Discord
+├── 05_discord.md     # Comportamiento en Discord
+└── 06_proactive.md   # Habla proactiva
 ```
 
 ## Uso
 
+### Ejecutables rápidos (doble click)
+
+| Archivo | Descripción |
+|---------|-------------|
+| `Iniciar MIA.bat` | Arranca el bot (Ctrl+C para cerrar) |
+| `Vectorizar Memoria.bat` | Procesa sesiones guardadas con LLM |
+| `Borrar Memoria.bat` | Limpia toda la memoria vectorizada |
+
+### Línea de comandos
+
 ```bash
 .venv\Scripts\python -m mia.main
 ```
+
+### WebUI
+
+Al iniciar MIA, se levanta un panel web en `http://localhost:8080` con:
+
+- **Chat** — Mensajes en tiempo real
+- **Terminal** — Logs del sistema
+- **Memory** — Visualización 3D interactiva de la memoria vectorizada (Three.js)
+- **Controles** — Pausar escucha, modo proactivo, sliders, RAG toggle
 
 ### Slash commands en Discord
 
@@ -103,6 +127,19 @@ prompts/
 3. Cuando hay silencio grupal (1.5s por defecto), procesa todo lo dicho
 4. Responde con voz sintetizada en el canal
 
+## Sistema de Memoria
+
+MIA usa un sistema de memoria en dos fases:
+
+1. **Sesión activa** — El historial se guarda automáticamente como `.jsonl` al cerrar MIA
+2. **Vectorización offline** — Un LLM cura qué es relevante y solo eso se vectoriza en ChromaDB
+
+```
+MIA sesión → data/chat_sessions/*.jsonl → vectorize_memory.py → ChromaDB
+```
+
+Esto evita acumular datos irrelevantes en la memoria — solo se guardan datos útiles como nombres, preferencias, eventos importantes.
+
 ## Arquitectura
 
 ```
@@ -117,8 +154,8 @@ discord_bot.py
     LLM (OpenRouter/local) → respuesta
         ↓
     TTS (Edge TTS) → audio
-        ↓
-    FFmpeg → reproduce en Discord
+        ↓           ↓
+    FFmpeg → Discord   WebUI → chat + subtítulos
 ```
 
 ## Tests
@@ -142,8 +179,19 @@ MIA-AI/
 │   ├── llm_lmstudio.py      # LLM via LM Studio
 │   ├── llm_llamacpp.py      # LLM local
 │   ├── tts_edge.py          # Text-to-Speech
-│   └── rag_memory.py        # Memoria conversacional
+│   ├── tts_filter.py        # Filtro de texto para TTS
+│   ├── rag_memory.py        # Memoria conversacional (ChromaDB)
+│   ├── web_server.py        # WebUI server (aiohttp)
+│   └── webui/               # Frontend (HTML/CSS/JS/Three.js)
 ├── prompts/                 # Personalidad modular
+├── data/
+│   ├── chat_sessions/       # Sesiones guardadas (JSONL)
+│   └── chroma_db/           # Memoria vectorizada
+├── vectorize_memory.py      # Script de vectorización con LLM
+├── clear_memory.py          # Script de limpieza de memoria
+├── Iniciar MIA.bat          # Ejecutable Windows
+├── Vectorizar Memoria.bat   # Ejecutable Windows
+├── Borrar Memoria.bat       # Ejecutable Windows
 ├── config.yaml              # Configuración
 ├── .env                     # Secrets (gitignored)
 └── tests/                   # Tests

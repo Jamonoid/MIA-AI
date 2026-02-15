@@ -1,5 +1,0 @@
-- Poder usar MCP y buscar por internet.
-- Ejecutar comandos de discord como mover gente de canal, cambiarles el nombre, etc...
-- Poder leer el chat de discord
-- Ejecutar sonidos del soundboard.
-- Que pueda ver la pantalla cuando alguien transmite por discord.
