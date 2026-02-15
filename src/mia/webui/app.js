@@ -31,9 +31,13 @@
     // Terminal
     const tabChat = $("#tabChat");
     const tabTerminal = $("#tabTerminal");
+    const tabMemory = $("#tabMemory");
     const terminalPanel = $("#terminalPanel");
     const terminalOutput = $("#terminalOutput");
+    const memoryPanel = $("#memoryPanel");
+    const btnRefreshMemory = $("#btnRefreshMemory");
     const MAX_LOG_LINES = 500;
+    let memoryInitialized = false;
 
     // Stats
     const statSpeakers = $("#statSpeakers .stat-value");
@@ -324,20 +328,43 @@
 
     // ── Tab switching ──
 
-    tabChat.addEventListener("click", () => {
-        tabChat.classList.add("active");
-        tabTerminal.classList.remove("active");
-        chatMessages.style.display = "";
-        terminalPanel.style.display = "none";
-    });
-
-    tabTerminal.addEventListener("click", () => {
-        tabTerminal.classList.add("active");
+    function switchTab(tab) {
         tabChat.classList.remove("active");
+        tabTerminal.classList.remove("active");
+        tabMemory.classList.remove("active");
         chatMessages.style.display = "none";
-        terminalPanel.style.display = "";
-        terminalPanel.scrollTop = terminalPanel.scrollHeight;
-    });
+        terminalPanel.style.display = "none";
+        memoryPanel.style.display = "none";
+
+        if (tab === "chat") {
+            tabChat.classList.add("active");
+            chatMessages.style.display = "";
+        } else if (tab === "terminal") {
+            tabTerminal.classList.add("active");
+            terminalPanel.style.display = "";
+            terminalPanel.scrollTop = terminalPanel.scrollHeight;
+        } else if (tab === "memory") {
+            tabMemory.classList.add("active");
+            memoryPanel.style.display = "";
+            if (!memoryInitialized && typeof Memory3D !== "undefined") {
+                Memory3D.init("memoryCanvas");
+                Memory3D.start();
+                memoryInitialized = true;
+            } else if (memoryInitialized) {
+                Memory3D.onResize();
+            }
+        }
+    }
+
+    tabChat.addEventListener("click", () => switchTab("chat"));
+    tabTerminal.addEventListener("click", () => switchTab("terminal"));
+    tabMemory.addEventListener("click", () => switchTab("memory"));
+
+    if (btnRefreshMemory) {
+        btnRefreshMemory.addEventListener("click", () => {
+            if (memoryInitialized) Memory3D.start();
+        });
+    }
 
     // ── Terminal log ──
 

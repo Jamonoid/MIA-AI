@@ -17,6 +17,9 @@ import sys
 import time
 from pathlib import Path
 
+# Asegurar que el paquete mia sea importable
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
 # ── Logging ──
 logging.basicConfig(
     level=logging.INFO,

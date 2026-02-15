@@ -204,3 +204,63 @@ class RAGMemory:
         )
         logger.info("RAG: %d documentos eliminados", count)
         return count
+
+    def get_3d_points(self) -> list[dict]:
+        """Retorna todos los docs con coordenadas 3D (PCA de embeddings)."""
+        if not self._client or not self._collection:
+            return []
+
+        count = self._collection.count()
+        if count == 0:
+            return []
+
+        # Obtener todos los datos
+        data = self._collection.get(
+            include=["embeddings", "documents", "metadatas"],
+        )
+
+        embeddings = data.get("embeddings", [])
+        documents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
+
+        if not embeddings or len(embeddings) < 2:
+            # Con < 2 puntos PCA no tiene sentido
+            points = []
+            for i, doc in enumerate(documents):
+                ts = metadatas[i].get("timestamp", 0) if metadatas else 0
+                points.append({
+                    "x": 0, "y": 0, "z": 0,
+                    "text": doc[:200] if doc else "",
+                    "timestamp": ts,
+                })
+            return points
+
+        try:
+            from sklearn.decomposition import PCA
+            import numpy as np
+
+            emb_array = np.array(embeddings)
+            n_components = min(3, emb_array.shape[0], emb_array.shape[1])
+            pca = PCA(n_components=n_components)
+            coords_3d = pca.fit_transform(emb_array)
+
+            # Normalizar a rango [-1, 1] para la escena
+            if coords_3d.max() != coords_3d.min():
+                coords_3d = (coords_3d - coords_3d.mean(axis=0)) / (coords_3d.std(axis=0) + 1e-8)
+
+            points = []
+            for i in range(len(documents)):
+                ts = metadatas[i].get("timestamp", 0) if metadatas else 0
+                x = float(coords_3d[i, 0]) if n_components > 0 else 0
+                y = float(coords_3d[i, 1]) if n_components > 1 else 0
+                z = float(coords_3d[i, 2]) if n_components > 2 else 0
+                points.append({
+                    "x": x, "y": y, "z": z,
+                    "text": documents[i][:200] if documents[i] else "",
+                    "timestamp": ts,
+                })
+            return points
+
+        except ImportError:
+            logger.warning("sklearn no disponible para PCA")
+            return []

@@ -195,6 +195,8 @@ class MIAPipeline:
             self._web_server.set_state_provider(
                 self._discord_bot.get_state
             )
+            # RAG → 3D visualization endpoint
+            self._web_server._rag = self._rag
 
             # ── Log forwarding → WebUI ──
             class _WebUILogHandler(logging.Handler):
@@ -256,7 +258,8 @@ class MIAPipeline:
         self._running = False
 
         # ── Guardar sesión de chat ──
-        if self._chat_history:
+        session_log = getattr(self._discord_bot, "_session_log", []) if self._discord_bot else self._chat_history
+        if session_log:
             try:
                 from datetime import datetime
                 sessions_dir = Path("data/chat_sessions")
@@ -265,9 +268,9 @@ class MIAPipeline:
                 session_file = sessions_dir / f"session_{ts}.jsonl"
                 import json
                 with open(session_file, "w", encoding="utf-8") as f:
-                    for msg in self._chat_history:
+                    for msg in session_log:
                         f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-                logger.info("Sesión guardada: %s (%d mensajes)", session_file.name, len(self._chat_history))
+                logger.info("Sesión guardada: %s (%d mensajes)", session_file.name, len(session_log))
             except Exception:
                 logger.exception("Error guardando sesión de chat")
 

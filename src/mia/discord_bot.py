@@ -70,6 +70,7 @@ class MIADiscordBot:
         self._rag = rag
         self._executor = executor
         self._chat_history = chat_history
+        self._session_log: list[dict[str, str]] = []  # Full session, never trimmed
         self._config = config
 
         self._voice_sink: Optional[GroupVoiceSink] = None
@@ -204,6 +205,7 @@ class MIADiscordBot:
         elif command == "toggle_proactive":
             self._proactive_mode = bool(value)
             if self._proactive_mode:
+                self._last_voice_activity = time.monotonic()  # Fresh start
                 self._start_proactive_timer()
             else:
                 self._stop_proactive_timer()
@@ -373,6 +375,7 @@ class MIADiscordBot:
 
             # Historial
             self._chat_history.append({"role": "assistant", "content": raw})
+            self._session_log.append({"role": "assistant", "content": raw})
             if len(self._chat_history) > 20:
                 self._chat_history[:] = self._chat_history[-12:]
 
@@ -1049,6 +1052,10 @@ class MIADiscordBot:
             self._chat_history.append(
                 {"role": "assistant", "content": clean_response}
             )
+            self._session_log.append({"role": "user", "content": user_text})
+            self._session_log.append(
+                {"role": "assistant", "content": clean_response}
+            )
             if len(self._chat_history) > 20:
                 self._chat_history[:] = self._chat_history[-12:]
 
@@ -1099,6 +1106,10 @@ class MIADiscordBot:
         # Historial
         self._chat_history.append({"role": "user", "content": user_text})
         self._chat_history.append(
+            {"role": "assistant", "content": clean_response}
+        )
+        self._session_log.append({"role": "user", "content": user_text})
+        self._session_log.append(
             {"role": "assistant", "content": clean_response}
         )
         if len(self._chat_history) > 20:

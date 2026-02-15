@@ -32,10 +32,12 @@ class MIAWebServer:
         self._runner: web.AppRunner | None = None
         self._command_handler: Callable[[str, Any], Any] | None = None
         self._state_provider: Callable[[], dict] | None = None
+        self._rag: Any = None
 
         # Routes
         self._app.router.add_get("/ws", self._ws_handler)
         self._app.router.add_get("/api/state", self._api_state)
+        self._app.router.add_get("/api/memory_3d", self._api_memory_3d)
         # Static files (serve index.html at root)
         if WEBUI_DIR.is_dir():
             self._app.router.add_get("/", self._serve_index)
@@ -66,6 +68,17 @@ class MIAWebServer:
         if self._state_provider:
             state = self._state_provider()
         return web.json_response(state)
+
+    async def _api_memory_3d(self, request: web.Request) -> web.Response:
+        """Retorna puntos 3D de la memoria vectorizada para visualización."""
+        if not self._rag or not self._rag.enabled:
+            return web.json_response({"points": [], "count": 0})
+        try:
+            points = self._rag.get_3d_points()
+            return web.json_response({"points": points, "count": len(points)})
+        except Exception as e:
+            logger.exception("Error generando puntos 3D")
+            return web.json_response({"points": [], "count": 0, "error": str(e)})
 
     # ──────────────────────────────────────────
     # WebSocket

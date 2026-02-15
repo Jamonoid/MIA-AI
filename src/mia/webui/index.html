@@ -48,6 +48,7 @@
                 <div class="tab-bar">
                     <button class="tab active" id="tabChat" data-tab="chat">💬 Chat</button>
                     <button class="tab" id="tabTerminal" data-tab="terminal">🖥️ Terminal</button>
+                    <button class="tab" id="tabMemory" data-tab="memory">🧠 Memory</button>
                 </div>
 
                 <div class="chat-messages" id="chatMessages">
@@ -59,6 +60,15 @@
 
                 <div class="terminal-panel" id="terminalPanel" style="display:none">
                     <div class="terminal-output" id="terminalOutput"></div>
+                </div>
+
+                <div class="memory-panel" id="memoryPanel" style="display:none">
+                    <div class="memory-header">
+                        <span class="memory-count" id="memoryCount">0 memories</span>
+                        <button class="btn-small" id="btnRefreshMemory">🔄 Refresh</button>
+                    </div>
+                    <div class="memory-canvas" id="memoryCanvas"></div>
+                    <div class="memory-tooltip" id="memoryTooltip"></div>
                 </div>
             </div>
 
@@ -195,6 +205,9 @@
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="memory3d.js"></script>
     <script src="app.js"></script>
 </body>
 
