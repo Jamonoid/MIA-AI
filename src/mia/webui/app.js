@@ -348,6 +348,7 @@
             memoryPanel.style.display = "";
             if (!memoryInitialized && typeof Memory3D !== "undefined") {
                 Memory3D.init("memoryCanvas");
+                Memory3D.start();
                 memoryInitialized = true;
             } else if (memoryInitialized) {
                 Memory3D.onResize();

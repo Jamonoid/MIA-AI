@@ -651,8 +651,6 @@ body {
     position: relative;
     background: #0a0a1a;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
 }
 
 .memory-header {
@@ -694,9 +692,8 @@ body {
 }
 
 .memory-canvas {
-    flex: 1;
     width: 100%;
-    min-height: 0;
+    height: 100%;
 }
 
 .memory-canvas canvas {
