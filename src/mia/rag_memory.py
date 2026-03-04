@@ -223,7 +223,7 @@ class RAGMemory:
         documents = data.get("documents", [])
         metadatas = data.get("metadatas", [])
 
-        if not embeddings or len(embeddings) < 2:
+        if embeddings is None or len(embeddings) < 2:
             # Con < 2 puntos PCA no tiene sentido
             points = []
             for i, doc in enumerate(documents):

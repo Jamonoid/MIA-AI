@@ -161,6 +161,10 @@ class MIAPipeline:
 
         logger.info("Discord: creando bot...")
         try:
+            # Aplicar DAVE patch antes de iniciar el bot (requerido desde marzo 2026)
+            from .dave_patch import apply_dave_patch
+            apply_dave_patch()
+
             from .discord_bot import MIADiscordBot
 
             self._discord_bot = MIADiscordBot(
